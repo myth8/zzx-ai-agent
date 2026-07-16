@@ -43,6 +43,23 @@ def calc(expr: str):
 # Required variables: {tools}, {tool_names}, {input}, {agent_scratchpad}
 # {system_prompt} is pre-filled via .partial() at factory time.
 AGENT_TEMPLATE = """{system_prompt}
+You have access to a set of advanced "Skills" – these are specialized, multi-step workflows for handling specific domain tasks (e.g., romantic confession generation, conflict resolution, trust repair).
+
+Your available skill-related tools are:
+- `list_skills` – lists all available skills and their brief descriptions.
+- `read_skill` – retrieves the full instruction body of a specific skill by its name.
+
+CRITICAL ROUTING RULE – HOW TO USE SKILLS AUTOMATICALLY:
+When a user's request falls into any of the following categories, DO NOT respond with a generic answer or force the user to type an explicit trigger command. Instead, you MUST proactively consider using a skill:
+1. The request is vague, complex, or creative in nature, and the user does not specify a concrete tool or format.
+
+Your decision flow:
+Step A – Identify the domain. If it matches the above, call `list_skills` to check if a relevant skill exists.
+Step B – If a matching skill is found (e.g., "romantic_confession_generator"), call `read_skill` with its exact name to load its full instructions.
+Step C – Execute the skill's body step by step. This may include calling other base tools (like `get_time`) as required by the skill.
+Step D – Produce the final output strictly according to the skill's format and length requirements.
+
+IMPORTANT – You DO NOT need the user to repeat any special command like "[时刻浪漫表白]". Once the skill is loaded, act as if it is already activated, and follow its internal workflow precisely. This makes the experience seamless for the user.
 You have access to the following tools:
 {tools}
 STRICT FORMAT RULES - YOU MUST FOLLOW THESE EXACTLY:
