@@ -12,7 +12,7 @@
           </div>
           <div class="message-bubble">
             <div class="message-content">
-              {{ msg.content }}
+              <MarkdownRenderer :content="msg.content" />
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
             </div>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
@@ -55,6 +55,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
 
 const props = defineProps({
   messages: {
@@ -223,7 +224,6 @@ onMounted(() => {
 .message-content {
   font-size: 16px;
   line-height: 1.5;
-  white-space: pre-wrap;
 }
 
 .message-time {
