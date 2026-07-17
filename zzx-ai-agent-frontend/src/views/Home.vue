@@ -1,5 +1,15 @@
 ﻿<template>
   <div class="home-container">
+    <!-- User info bar -->
+    <div class="user-bar" v-if="user">
+      <div class="user-avatar">{{ user.nickname.charAt(0) }}</div>
+      <div class="user-meta">
+        <span class="user-nick">{{ user.nickname }}</span>
+        <span class="user-name">@{{ user.username }}</span>
+      </div>
+      <button class="logout-btn" @click="handleLogout" title="退出登录">退出</button>
+    </div>
+
     <div class="header">
       <div class="glitch-wrapper">
         <h1 class="glitch-title">ZZX-AI超级智能体</h1>
@@ -47,6 +57,7 @@
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import AppFooter from '../components/AppFooter.vue'
@@ -68,8 +79,23 @@ useHead({
 
 const router = useRouter()
 
+const user = ref(null)
+
+onMounted(() => {
+  const raw = localStorage.getItem('user')
+  if (raw) {
+    try { user.value = JSON.parse(raw) } catch {}
+  }
+})
+
 const navigateTo = (path) => {
   router.push(path)
+}
+
+function handleLogout() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  router.push('/login')
 }
 </script>
 
@@ -101,7 +127,7 @@ const navigateTo = (path) => {
 
 /* 赛博朋克风格标题 */
 .header {
-  padding: 70px 20px 50px;
+  padding: 50px 20px 50px;
   text-align: center;
   background-color: transparent;
   position: relative;
@@ -452,7 +478,72 @@ const navigateTo = (path) => {
 }
 
 /* 响应式设计 */
+/* User info bar */
+.user-bar {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(17, 23, 41, 0.75);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 30px;
+  padding: 6px 6px 6px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: box-shadow 0.3s;
+}
+.user-bar:hover {
+  box-shadow: 0 4px 24px rgba(0, 240, 255, 0.15);
+}
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00f0ff, #0088ff);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+}
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.user-nick {
+  color: #edf7ff;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.user-name {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.7rem;
+}
+.logout-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-family: inherit;
+}
+.logout-btn:hover {
+  background: rgba(255, 71, 87, 0.2);
+  border-color: rgba(255, 71, 87, 0.4);
+  color: #ff4757;
+}
 @media (max-width: 768px) {
+  .user-meta { display: none; }
   .glitch-title {
     font-size: 2.5rem;
   }
@@ -480,6 +571,7 @@ const navigateTo = (path) => {
 }
 
 @media (max-width: 480px) {
+  .user-meta { display: none; }
   .header {
     padding: 50px 15px 40px;
   }

@@ -1,6 +1,25 @@
-﻿import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
+
+// Routes that do NOT require authentication
+const publicRoutes = ['Login', 'Register']
 
 const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/Login.vue'),
+    meta: {
+      title: '登录 - ZZX-AI超级智能体'
+    }
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: () => import('../views/Register.vue'),
+    meta: {
+      title: '注册 - ZZX-AI超级智能体'
+    }
+  },
   {
     path: '/',
     name: 'Home',
@@ -35,13 +54,27 @@ const router = createRouter({
   routes
 })
 
-// 全局导航守卫，设置文档标题
+// Global navigation guard
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
+  // Set page title
   if (to.meta.title) {
     document.title = to.meta.title
+  }
+
+  // Check login status
+  const token = localStorage.getItem('token')
+  if (!publicRoutes.includes(to.name)) {
+    // Protected route -> require login
+    if (!token) {
+      return next({ name: 'Login', query: { redirect: to.fullPath } })
+    }
+  } else {
+    // Logged-in user visiting login/register -> redirect home
+    if (token) {
+      return next({ name: 'Home' })
+    }
   }
   next()
 })
 
-export default router 
+export default router
