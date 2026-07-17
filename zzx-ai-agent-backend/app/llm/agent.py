@@ -94,16 +94,20 @@ Thought:{agent_scratchpad}"""
 # ==============================
 # Factory & Streaming
 # ==============================
-def make_agent(system_prompt):
+def make_agent(system_prompt, context=""):
     """
     Build a ReAct AgentExecutor.
     Args:
         system_prompt: Role instruction for the AI.
+        context:       Conversation history (optional).
     Returns:
         AgentExecutor (Runnable) usable with .stream() / .invoke()
     """
+    full_prompt = system_prompt
+    if context:
+        full_prompt = system_prompt + "\n\n【对话历史】\n" + context
     tools = [get_time, calc]
-    prompt = PromptTemplate.from_template(AGENT_TEMPLATE).partial(system_prompt=system_prompt)
+    prompt = PromptTemplate.from_template(AGENT_TEMPLATE).partial(system_prompt=full_prompt)
     agent = create_react_agent(llm, tools, prompt)
     return AgentExecutor(
         agent=agent,
@@ -123,7 +127,7 @@ def extract_thought(log_text: str) -> str:
     return log_text.strip()  # 保底
 
 
-def stream_agent(executor, message):
+def stream_agent(executor, message, session_id="", llm_ref=None):
     """
     Synchronous agent streaming with real-time thinking log.
 
@@ -133,14 +137,17 @@ def stream_agent(executor, message):
     Args:
         executor: AgentExecutor returned by make_agent()
         message: User input string.
+        session_id: For saving messages after stream (optional).
+        llm_ref: LLM instance for summary generation (optional).
 
     Yields:
         str: Event strings for SSE - either "[THINK] <msg>"
              or the final answer text.
     """
     print(f"\n{'='*60}", flush=True)
-    print(f"[Agent] Input: {message}", flush=True)
+    print(f"[Agent] session={session_id} | Input: {message}", flush=True)
     print(f"{'='*60}", flush=True)
+    final_answer = ""
 
     for step in executor.stream({"input": message}):
         actions = step.get("actions", [])
@@ -163,5 +170,16 @@ def stream_agent(executor, message):
                 yield f"[STEP] 工具: {tool_name} 输入: {tool_in} 结果: {obs[:300]}"
         if "output" in step:
             answer = step["output"]
+            final_answer = answer
             print(f"\n  -- Final Answer:\n{answer}\n", flush=True)
             yield f"[FINAL] {answer}"
+
+    # Save messages and trigger summary if we have a session_id
+    if session_id and final_answer:
+        try:
+            from app.chat_history import save_message, update_summary
+            save_message(session_id, "assistant", final_answer)
+            if llm_ref:
+                update_summary(session_id)
+        except Exception as e:
+            print(f"[Agent] save error: {e}", flush=True)

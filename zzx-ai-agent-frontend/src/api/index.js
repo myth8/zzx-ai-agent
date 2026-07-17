@@ -10,6 +10,15 @@ const request = axios.create({
   timeout: 60000
 })
 
+// --- request interceptor: attach Bearer token -------------------
+request.interceptors.request.use(config => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = 'Bearer ' + token
+  }
+  return config
+})
+
 // --- Auth API ----------------------------------------------------
 
 export const register = (username, nickname, password) => {
@@ -25,7 +34,29 @@ export const fetchCurrentUser = () => {
   if (!token) return Promise.reject(new Error('no token'))
   return request.get('/auth/userinfo', {
     headers: { Authorization: 'Bearer ' + token }
-  }).then(r => r.data)
+    }).then(r => r.data)
+}
+
+// --- Session API -------------------------------------------------
+
+export const listSessions = (chatType) => {
+  return request.get('/session/list', { params: { chat_type: chatType } }).then(r => r.data)
+}
+
+export const createSession = (chatType, title) => {
+  return request.post('/session/create', { chat_type: chatType, title }).then(r => r.data)
+}
+
+export const renameSession = (sessionId, title) => {
+  return request.put('/session/rename', { session_id: sessionId, title }).then(r => r.data)
+}
+
+export const deleteSession = (sessionId) => {
+  return request.delete('/session/' + sessionId).then(r => r.data)
+}
+
+export const getSessionMessages = (sessionId) => {
+  return request.get('/session/' + sessionId + '/messages').then(r => r.data)
 }
 
 // --- SSE helper --------------------------------------------------
@@ -56,14 +87,18 @@ export const connectSSE = (url, params, onMessage, onError) => {
   return eventSource
 }
 
-// AI Love Master chat
-export const chatWithLoveApp = (message, chatId) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId })
+// AI Love Master chat (supports session_id for multi-turn)
+export const chatWithLoveApp = (message, sessionId) => {
+  const params = { message }
+  if (sessionId) params.session_id = sessionId
+  return connectSSE('/ai/love_app/chat/sse', params)
 }
 
-// AI Super Agent chat
-export const chatWithManus = (message) => {
-  return connectSSE('/ai/manus/chat', { message })
+// AI Super Agent chat (supports session_id for multi-turn)
+export const chatWithManus = (message, sessionId) => {
+  const params = { message }
+  if (sessionId) params.session_id = sessionId
+  return connectSSE('/ai/manus/chat', params)
 }
 
 export default {

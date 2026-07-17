@@ -17,7 +17,9 @@ def create_app():
     # Initialise database tables on startup
     with app.app_context():
         from app.auth import init_db
+        from app.chat_history import init_tables as init_chat_tables
         init_db()
+        init_chat_tables()
 
     # Minimal CORS via after_request
     @app.after_request
@@ -31,9 +33,11 @@ def create_app():
     from app.routes.manus import manus_bp
     from app.routes.love_app import love_bp
     from app.auth import auth_bp
+    from app.routes.session import session_bp
     app.register_blueprint(manus_bp)
     app.register_blueprint(love_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(session_bp)
 
     # Health check
     @app.route("/api/health")

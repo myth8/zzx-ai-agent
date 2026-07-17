@@ -3,6 +3,12 @@ import os
 import sys
 import ssl
 
+# ── Ensure pylib is in path before any app imports ──────────────
+_pylib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pylib")
+if os.path.isdir(_pylib) and _pylib not in sys.path:
+    sys.path.insert(0, _pylib)
+del _pylib
+
 # Windows SSL workaround — patch BOTH names since aiohttp calls create_default_context directly
 if sys.platform == "win32" and sys.version_info < (3, 10):
     ssl._create_default_https_context = ssl._create_unverified_context

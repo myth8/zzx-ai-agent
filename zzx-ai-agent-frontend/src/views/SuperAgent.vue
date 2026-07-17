@@ -3,7 +3,7 @@
     <div class="header">
       <div class="back-button" @click="goBack">返回</div>
       <h1 class="title">AI超级智能体</h1>
-      <div class="placeholder"></div>
+      <div class="session-label" v-if="sessionId">会话 #{{ sessionId.slice(0,6) }}</div>
     </div>
     
     <div class="content-wrapper">
@@ -24,12 +24,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppFooter from '../components/AppFooter.vue'
-import { chatWithManus } from '../api'
+import { chatWithManus, getSessionMessages } from '../api'
 
 useHead({
   title: 'AI超级智能体 - ZZX-AI超级智能体',
@@ -46,9 +46,31 @@ useHead({
 })
 
 const router = useRouter()
+const route = useRoute()
 const messages = ref([])
+const sessionId = ref(route.params.sessionId || "")
 const connectionStatus = ref('disconnected')
 let eventSource = null
+
+async function loadSessionMessages(sid) {
+  sessionId.value = sid
+  messages.value = []
+  if (sid) {
+    try {
+      const res = await getSessionMessages(sid)
+      if (res.code === 0 && res.data) {
+        for (const m of res.data) {
+          messages.value.push({
+            content: m.content,
+            isUser: m.role === 'user',
+            time: new Date(m.created_at || Date.now()).getTime(),
+            type: m.role === 'user' ? '' : 'ai-final',
+          })
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+}
 
 const addMessage = (content, isUser, type) => {
   messages.value.push({
@@ -68,7 +90,7 @@ const sendMessage = (message) => {
 
   connectionStatus.value = 'connecting'
 
-  eventSource = chatWithManus(message)
+  eventSource = chatWithManus(message, sessionId.value)
 
   eventSource.onmessage = (event) => {
     const data = event.data
@@ -97,11 +119,22 @@ const sendMessage = (message) => {
 }
 
 const goBack = () => {
-  router.push('/')
+  router.push('/super-agent')
 }
 
+watch(() => route.params.sessionId, (newSid) => {
+  if (newSid && newSid !== sessionId.value) {
+    sessionId.value = newSid
+    loadSessionMessages(newSid)
+  }
+})
+
 onMounted(() => {
-  addMessage('你好，我是AI超级智能体。我可以解答各类问题，提供专业建议，请问有什么可以帮助你的吗？', false, '')
+  if (route.params.sessionId) {
+    loadSessionMessages(route.params.sessionId)
+  } else {
+    addMessage('你好，我是AI超级智能体。我可以解答各类问题，提供专业建议，请问有什么可以帮助你的吗？', false, '')
+  }
 })
 
 onBeforeUnmount(() => {

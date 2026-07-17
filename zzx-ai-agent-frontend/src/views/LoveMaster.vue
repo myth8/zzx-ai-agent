@@ -3,7 +3,7 @@
     <div class="header">
       <div class="back-button" @click="goBack">返回</div>
       <h1 class="title">AI恋爱大师</h1>
-      <div class="chat-id">会话ID: {{ chatId }}</div>
+      <div class="session-label" v-if="sessionId">会话 #{{ sessionId.slice(0,6) }}</div>
     </div>
     
     <div class="content-wrapper">
@@ -24,12 +24,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppFooter from '../components/AppFooter.vue'
-import { chatWithLoveApp } from '../api'
+import { chatWithLoveApp, getSessionMessages } from '../api'
 
 // 设置页面标题和元数据
 useHead({
@@ -47,14 +47,31 @@ useHead({
 })
 
 const router = useRouter()
+const route = useRoute()
 const messages = ref([])
-const chatId = ref('')
+const sessionId = ref(route.params.sessionId || "")
+const sidebarVisible = ref(true)
 const connectionStatus = ref('disconnected')
 let eventSource = null
 
 // 生成随机会话ID
-const generateChatId = () => {
-  return 'love_' + Math.random().toString(36).substring(2, 10)
+async function loadSessionMessages(sid) {
+  messages.value = []
+  if (sid) {
+    try {
+      const res = await getSessionMessages(sid)
+      if (res.code === 0 && res.data) {
+        for (const m of res.data) {
+          messages.value.push({
+            content: m.content,
+            isUser: m.role === 'user',
+            time: new Date(m.created_at || Date.now()).getTime(),
+            type: m.role === 'user' ? '' : 'ai-final'
+          })
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
 }
 
 // 添加消息到列表
@@ -80,7 +97,7 @@ const sendMessage = (message) => {
   addMessage('', false)
   
   connectionStatus.value = 'connecting'
-  eventSource = chatWithLoveApp(message, chatId.value)
+  eventSource = chatWithLoveApp(message, sessionId.value)
   
   // 监听SSE消息
   eventSource.onmessage = (event) => {
@@ -113,16 +130,23 @@ const sendMessage = (message) => {
 
 // 返回主页
 const goBack = () => {
-  router.push('/')
+  router.push('/love-master')
 }
 
 // 页面加载时添加欢迎消息
+watch(() => route.params.sessionId, (newSid) => {
+  if (newSid) {
+    sessionId.value = newSid
+    loadSessionMessages(newSid)
+  }
+})
+
 onMounted(() => {
-  // 生成聊天ID
-  chatId.value = generateChatId()
-  
-  // 添加欢迎消息
-  addMessage('欢迎来到AI恋爱大师，请告诉我你的恋爱问题，我会尽力给予帮助和建议。', false)
+  if (route.params.sessionId) {
+    loadSessionMessages(route.params.sessionId)
+  } else {
+    addMessage('欢迎来到AI恋爱大师，请告诉我你的恋爱问题，我会尽力给予帮助和建议。', false)
+  }
 })
 
 // 组件销毁前关闭SSE连接
@@ -154,6 +178,22 @@ onBeforeUnmount(() => {
   z-index: 10;
 }
 
+.sidebar-toggle {
+  font-size: 18px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: white;
+  padding: 4px 8px;
+  margin-right: 4px;
+  border-radius: 6px;
+  transition: background 0.2s;
+  line-height: 1;
+}
+.sidebar-toggle:hover {
+  background: rgba(255,255,255,0.15);
+}
+
 .back-button {
   font-size: 16px;
   cursor: pointer;
@@ -177,9 +217,9 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.chat-id {
-  font-size: 14px;
-  opacity: 0.8;
+.session-label {
+  font-size: 13px;
+  opacity: 0.7;
 }
 
 .content-wrapper {
@@ -194,8 +234,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   position: relative;
   /* 设置最小高度确保内容显示正常 */
-  min-height: calc(100vh - 56px - 180px); /* 100vh减去头部高度和页脚高度 */
-  margin-bottom: 16px; /* 为页脚留出空间 */
+  min-height: calc(100vh - 56px - 180px);
+  margin-bottom: 16px;
 }
 
 .footer-container {
