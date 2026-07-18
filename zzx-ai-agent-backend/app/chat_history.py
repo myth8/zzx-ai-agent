@@ -1,25 +1,20 @@
 """
-Chat History Management
-=======================
-Manages sessions, messages, and conversation summaries in MySQL.
-Provides context building for multi-turn conversations.
+聊天历史管理
+============
+管理会话、消息和对话摘要，存储在 MySQL 中。
+提供多轮对话的上下文构建功能。
 """
 import uuid
-import time
-from datetime import datetime
-from flask import current_app
-import pymysql
-from app.auth import get_db, login_required
-from app.config import Config
 
-# Number of recent messages to include in context
-# Number of recent messages to include in context
+from app.auth import get_db
+
+# 上下文包含的最近消息数量
 RECENT_LIMIT = 50
 
-# ── Table Initialisation ──────────────────────────────────────────
+# ── 表初始化 ──────────────────────────────────────────────────────────
 
 def init_tables():
-    """Create sessions / chat_messages / chat_summaries tables."""
+    """创建会话 / 聊天消息 / 聊天摘要表。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -29,7 +24,7 @@ def init_tables():
                     user_id    INT NOT NULL,
                     session_id VARCHAR(100) NOT NULL UNIQUE,
                     chat_type  VARCHAR(20) NOT NULL COMMENT 'chain or agent',
-                    title      VARCHAR(200) DEFAULT '\u65b0\u5bf9\u8bdd',
+                    title      VARCHAR(200) DEFAULT '新对话',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     INDEX idx_user_id (user_id),
@@ -62,13 +57,13 @@ def init_tables():
         conn.close()
 
 
-# ── Session CRUD ──────────────────────────────────────────────────
+# ── 会话 CRUD ──────────────────────────────────────────────────
 
 def create_session(user_id, chat_type, title=None):
-    """Create a new session, return session_id."""
+    """创建新会话，返回 session_id。"""
     session_id = str(uuid.uuid4())[:8]
     if title is None:
-        title = "\u65b0\u5bf9\u8bdd"
+        title = "新对话"
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -83,7 +78,7 @@ def create_session(user_id, chat_type, title=None):
 
 
 def get_user_sessions(user_id, chat_type):
-    """List sessions for a user, ordered by updated_at desc."""
+    """获取用户的所有会话，按 updated_at 降序排列。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -108,7 +103,7 @@ def rename_session(session_id, title):
 
 
 def delete_session(session_id):
-    """Delete a session and all its messages and summary."""
+    """删除会话及其所有消息和摘要。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -130,10 +125,10 @@ def get_session_title(session_id):
         conn.close()
 
 
-# ── Message CRUD ──────────────────────────────────────────────────
+# ── 消息 CRUD ──────────────────────────────────────────────────
 
 def save_message(session_id, role, content):
-    """Save a message to the DB, auto-assign msg_order."""
+    """保存消息到数据库，自动分配 msg_order。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -152,7 +147,7 @@ def save_message(session_id, role, content):
 
 
 def get_session_messages(session_id):
-    """Get all messages for a session, ordered by msg_order."""
+    """获取会话的所有消息，按 msg_order 排序。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -167,7 +162,7 @@ def get_session_messages(session_id):
 
 
 def load_recent_messages(session_id, limit=RECENT_LIMIT):
-    """Load the most recent N messages for context."""
+    """加载最近的 N 条消息，用于构建上下文。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -177,16 +172,16 @@ def load_recent_messages(session_id, limit=RECENT_LIMIT):
                 (session_id, limit),
             )
             rows = cur.fetchall()
-            rows = list(reversed(rows))  # chronological order
+            rows = list(reversed(rows))  # 按时间顺序
             return rows
     finally:
         conn.close()
 
 
-# ── Summary Management ────────────────────────────────────────────
+# ── 摘要管理 ────────────────────────────────────────────────────────────
 
 def load_summary(session_id):
-    """Load the summary text for a session."""
+    """加载会话的摘要文本。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -201,7 +196,7 @@ def load_summary(session_id):
 
 
 def save_summary(session_id, summary_text):
-    """Insert or update the summary for a session."""
+    """插入或更新会话的摘要。"""
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -216,7 +211,7 @@ def save_summary(session_id, summary_text):
 
 
 def update_summary(session_id):
-    """Auto-generate summary via LLM if there are enough new messages."""
+    """通过 LLM 自动生成摘要（如果有足够的新消息）。"""
     from app.llm import llm
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_core.output_parsers import StrOutputParser
@@ -227,22 +222,22 @@ def update_summary(session_id):
 
     existing = load_summary(session_id)
 
-    # Build new lines
+    # 构建新消息行
     new_lines = ""
     for msg in recent:
-        prefix = "\u7528\u6237" if msg["role"] == "user" else "AI"
+        prefix = "用户" if msg["role"] == "user" else "AI"
         new_lines += f"{prefix}: {msg['content']}\n"
 
     prompt = ChatPromptTemplate.from_messages([
         ("human", (
-            "\u8bf7\u5c06\u4ee5\u4e0b\u5bf9\u8bdd\u538b\u7f29\u4e3a\u4e2d\u6587\u6458\u8981\uff0c\u53ea\u4fdd\u7559\u4ee5\u4e0b\u4fe1\u606f\uff1a\n"
-            "1. \u7528\u6237\u7684\u8eab\u4efd\u3001\u5174\u8da3\u3001\u76ee\u6807\n"
-            "2. \u7528\u6237\u63d0\u51fa\u7684\u4e3b\u8981\u95ee\u9898\u6216\u8bf7\u6c42\n"
-            "3. AI\u7ed9\u51fa\u7684\u5173\u952e\u56de\u7b54\u6216\u5efa\u8bae\n"
-            "\u4e0d\u8981\u91cd\u590d\u5bf9\u8bdd\u7ec6\u8282\uff0c\u53ea\u505a\u6982\u62ec\u3002\n\n"
-            "\u5f53\u524d\u6458\u8981\uff1a\n{summary}\n\n"
-            "\u65b0\u7684\u5bf9\u8bdd\u884c\uff1a\n{new_lines}\n\n"
-            "\u65b0\u7684\u6458\u8981\uff08\u4e0d\u8d85\u8fc7200\u5b57\uff09\uff1a"
+            "请将以下对话压缩为中文摘要，只保留以下信息：\n"
+            "1. 用户的身份、兴趣、目标\n"
+            "2. 用户提出的主要问题或请求\n"
+            "3. AI给出的关键回答或建议\n"
+            "不要重复对话细节，只做概括。\n\n"
+            "当前摘要：\n{summary}\n\n"
+            "新的对话行：\n{new_lines}\n\n"
+            "新的摘要（不超过500字）："
         )),
     ])
 
@@ -253,21 +248,21 @@ def update_summary(session_id):
         save_summary(session_id, new_summary)
 
 
-# ── Context Building ──────────────────────────────────────────────
+# ── 上下文构建 ──────────────────────────────────────────────────────────────
 
 def build_context(session_id):
-    """Build a context string containing summary + recent messages."""
+    """构建包含摘要和最近消息的上下文字符串。"""
     summary = load_summary(session_id)
     recent = load_recent_messages(session_id, RECENT_LIMIT)
 
     parts = []
     if summary:
-        parts.append(f"\u3010\u5bf9\u8bdd\u6458\u8981\u3011\n{summary}")
+        parts.append(f"【对话摘要】\n{summary}")
 
     if recent:
-        lines = ["\u3010\u6700\u8fd1\u5bf9\u8bdd\u3011"]
+        lines = ["【最近对话】"]
         for msg in recent:
-            prefix = "\u7528\u6237" if msg["role"] == "user" else "AI"
+            prefix = "用户" if msg["role"] == "user" else "AI"
             lines.append(f"{prefix}: {msg['content']}")
         parts.append("\n".join(lines))
 

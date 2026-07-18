@@ -1,10 +1,9 @@
-import hashlib
 import time
-import pymysql
 from functools import wraps
+
+import pymysql
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
-
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 

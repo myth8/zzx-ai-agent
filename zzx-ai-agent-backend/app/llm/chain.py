@@ -1,11 +1,11 @@
 """
-Chain Implementation
-====================
-Simple Prompt → LLM → text pipeline.
-Use: make_chain(system_prompt) → stream_chain(chain, message)
+Chain 实现
+==========
+简单的 Prompt → LLM → 文本流水线。
+使用方式：make_chain(system_prompt) → stream_chain(chain, message)
 
-Data flow:
-  ChatPromptTemplate (system + user) → ChatOpenAI → StrOutputParser → text chunks
+数据流：
+  ChatPromptTemplate (system + user) → ChatOpenAI → StrOutputParser → 文本块
 """
 import sys
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,24 +15,24 @@ from app.llm import llm
 
 def make_chain(system_prompt, context=""):
     """
-    Build a LangChain LCEL chain:
+    构建 LangChain LCEL 链：
       prompt_template | llm | string_parser
 
-    Args:
-        system_prompt: Role instruction for the AI.
-        context:       Conversation history (summary + recent messages).
+    参数：
+        system_prompt: AI 的角色指令。
+        context:       对话历史（摘要 + 最近消息）。
 
-    Returns:
-        A Runnable chain usable with .stream() / .invoke()
+    返回：
+        可用的 Runnable 链（可使用 .stream() / .invoke()）
     """
     human_template = "{input}"
     if context:
-        human_template = "\u3010\u5bf9\u8bdd\u5386\u53f2\u3011\n{history}\n\n---\n\n{input}"
+        human_template = "【对话历史】\n{history}\n\n---\n\n{input}"
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("human", human_template),
         ])
-        # Returns a chain that accepts both input and history
+        # 返回同时接受 input 和 history 的链
         return prompt | llm | StrOutputParser()
 
     prompt = ChatPromptTemplate.from_messages([
@@ -44,17 +44,17 @@ def make_chain(system_prompt, context=""):
 
 def stream_chain(chain, message, context="", session_id="", llm_ref=None):
     """
-    Synchronous streaming with real-time chunk logging.
+    同步流式输出，实时记录每个 token 块。
 
-    Args:
-        chain: Runnable returned by make_chain()
-        message: User input string.
-        context: Conversation history string (optional).
-        session_id: For saving messages after stream (optional).
-        llm_ref: LLM instance for summary generation (optional).
+    参数：
+        chain: make_chain() 返回的 Runnable
+        message: 用户输入的字符串
+        context: 对话历史字符串（可选）
+        session_id: 用于流结束后保存消息（可选）
+        llm_ref: 用于生成摘要的 LLM 实例（可选）
 
-    Yields:
-        str: Token-level text chunks from the LLM.
+    产出：
+        str: LLM 输出的 token 级别文本块
     """
     print(f"\n{'─'*60}", flush=True)
     print(f"[Chain] session={session_id} | Input: {message}", flush=True)
@@ -72,9 +72,9 @@ def stream_chain(chain, message, context="", session_id="", llm_ref=None):
             yield chunk
 
     print(f"[Chain] session={session_id} | final_answer: {final_answer[:100]}...", flush=True)
-    print("", flush=True)  # trailing newline
+    print("", flush=True)  # 换行
 
-    # Save messages and trigger summary if we have a session_id
+    # 如果提供了 session_id，则保存消息并触发摘要生成
     if session_id:
         try:
             from app.chat_history import save_message, update_summary
