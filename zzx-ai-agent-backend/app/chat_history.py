@@ -11,6 +11,10 @@ from app.auth import get_db
 # 上下文包含的最近消息数量
 RECENT_LIMIT = 50
 
+# 摘要更新策略：每 N 轮对话触发一次，或累计 token 超过阈值时触发
+SUMMARY_INTERVAL = 5  # 每隔多少轮对话更新一次摘要
+SUMMARY_TOKEN_THRESHOLD = 4000  # 累计消息超过此 token 估计值时强制触发摘要
+
 # ── 表初始化 ──────────────────────────────────────────────────────────
 
 def init_tables():
@@ -45,10 +49,10 @@ def init_tables():
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chat_summaries (
-                    id         INT AUTO_INCREMENT PRIMARY KEY,
-                    session_id VARCHAR(100) NOT NULL UNIQUE,
-                    summary    TEXT,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    id             INT AUTO_INCREMENT PRIMARY KEY,
+                    session_id     VARCHAR(100) NOT NULL UNIQUE,
+                    summary        TEXT,
+                    updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     INDEX idx_session_id (session_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
@@ -178,6 +182,34 @@ def load_recent_messages(session_id, limit=RECENT_LIMIT):
         conn.close()
 
 
+def get_message_count(session_id):
+    """获取会话的消息总数。"""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM chat_messages WHERE session_id=%s",
+                (session_id,),
+            )
+            return cur.fetchone()["cnt"]
+    finally:
+        conn.close()
+
+
+def get_total_chars(session_id):
+    """获取会话所有消息的字符总数，用于粗略估算 token 量。"""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(LENGTH(content)), 0) AS total FROM chat_messages WHERE session_id=%s",
+                (session_id,),
+            )
+            return cur.fetchone()["total"]
+    finally:
+        conn.close()
+
+
 # ── 摘要管理 ────────────────────────────────────────────────────────────
 
 def load_summary(session_id):
@@ -211,10 +243,30 @@ def save_summary(session_id, summary_text):
 
 
 def update_summary(session_id):
-    """通过 LLM 自动生成摘要（如果有足够的新消息）。"""
+    """
+    按策略自动生成/更新对话摘要。
+
+    触发条件（满足任一即可）：
+      1. 消息总轮数达到 SUMMARY_INTERVAL 的整数倍
+      2. 累计消息字符数估算的 token 量超过 SUMMARY_TOKEN_THRESHOLD
+
+    两个条件都不满足时直接跳过，不调用 LLM。
+    """
     from app.llm import llm
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_core.output_parsers import StrOutputParser
+
+    # ── 判断是否应该触发摘要更新 ──
+    msg_count = get_message_count(session_id)
+
+    # 条件1：按固定轮次触发（每轮 = user + assistant 两条消息）
+    rounds = msg_count // 2
+    if rounds % SUMMARY_INTERVAL != 0:
+        # 条件2：按 token 阈值触发（粗略估计，中文字符约 2 字符/token）
+        total_chars = get_total_chars(session_id)
+        estimated_tokens = total_chars / 2
+        if estimated_tokens < SUMMARY_TOKEN_THRESHOLD:
+            return  # 两个条件都不满足，跳过摘要生成
 
     recent = load_recent_messages(session_id, 20)
     if len(recent) < 2:
@@ -246,9 +298,6 @@ def update_summary(session_id):
 
     if new_summary:
         save_summary(session_id, new_summary)
-
-
-# ── 上下文构建 ──────────────────────────────────────────────────────────────
 
 def build_context(session_id):
     """构建包含摘要和最近消息的上下文字符串。"""
