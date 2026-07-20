@@ -12,6 +12,7 @@ Support multi-turn conversation via session_id + summary persistence.
 from flask import Blueprint, request
 
 from app.llm.agent import stream_agent, get_time, calc
+from app.llm.rag import rag_search
 from app.llm import llm
 from app.utils.sse import sse_response
 
@@ -41,5 +42,5 @@ def chat():
     if context:
         prompt = SYSTEM_PROMPT + "\n\n【对话历史】\n" + context
 
-    executor = create_agent(prompt, middleware=[_skill_middleware], extra_tools=[get_time, calc])
+    executor = create_agent(prompt, middleware=[_skill_middleware], extra_tools=[get_time, calc, rag_search])
     return sse_response(stream_agent, executor, message, session_id, llm)
