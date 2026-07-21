@@ -36,6 +36,30 @@ def calc(expr: str):
     except Exception as e:
         return f"Error: {e}"
 
+@tool
+def get_now_weather(location: str) -> dict:
+    """
+    Query real-time weather information for a specified location.
+
+    Args:
+        location: The location to query, supports city name (e.g., "Shanghai"),
+                  city pinyin (e.g., "shanghai"), or coordinates (e.g., "31.23:121.47").
+
+    Returns:
+        A string containing the real-time weather information, e.g.:
+        "Shanghai, China: Sunny, Temperature: 25°C, Last update: 2026-07-21 12:00"
+        If the query fails, returns an error message string (e.g., "未获取到天气数据").
+    """
+    import asyncio
+    from app.llm.mcp_tools import get_mcp_tools
+    mcp_tools = get_mcp_tools()
+    weather_tool = next((t for t in mcp_tools if t.name == "get_weather"), None)
+    try:
+        result = asyncio.run(weather_tool.ainvoke({"location": location}))
+        return str(result)
+    except Exception as e:
+        return "未获取到天气数据";
+
 
 # ==============================
 # ReAct Prompt Template
