@@ -1,5 +1,4 @@
-"""Startup entry. python run.py  |  $env:LLM_MODE='agent'; python run.py"""
-import os
+"""Startup entry. python run.py"""
 import sys
 import ssl
 
@@ -13,6 +12,5 @@ from app import create_app
 app = create_app()
 
 if __name__ == "__main__":
-    mode = os.getenv("LLM_MODE", "chain")
-    print(f"ZZX-AI API  |  Mode: {mode}  |  http://localhost:8123")
+    print(f"ZZX-AI API |  http://localhost:8123")
     app.run(host="0.0.0.0", port=8123, debug=True, threaded=True)

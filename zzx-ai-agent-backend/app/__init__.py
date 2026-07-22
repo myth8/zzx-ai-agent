@@ -43,6 +43,6 @@ def create_app():
     @app.route("/api/health")
     def health():
         from app.config import Config
-        return jsonify({"status": "ok", "mode": Config.LLM_MODE})
+        return jsonify({"status": "ok", "mode": Config.SYSTEM_NAME})
 
     return app
