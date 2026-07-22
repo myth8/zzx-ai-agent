@@ -14,9 +14,9 @@
       <div class="footer-section">
         <h4>友情链接</h4>
         <div class="footer-links">
-          <a href="https://juejin.cn/user/521640941459139" target="_blank">技术博文</a>
+          <a href="https://juejin.cn/user/521640941459139" target="_blank">技术博客</a>
           <a href="https://gitee.com/crzzx" target="_blank">开源仓库</a>
-          <a href="https://space.bilibili.com/1198127286?spm_id_from=333.1007.0.0" target="_blank">影音频道</a>
+          <a href="https://space.bilibili.com/1198127286?spm_id_from=333.1007.0.0" target="_blank">视频专栏</a>
         </div>
       </div>
       

@@ -17,4 +17,4 @@ class Config:
     MYSQL_DB = "zzx_agent_db"
 
     # JWT
-    JWT_SECRET = "zzx-ai-jwt-secret-2024"
+    JWT_SECRET = "zzx-ai-jwt-secret-2026"
