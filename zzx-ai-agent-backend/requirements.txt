@@ -1,3 +1,4 @@
+# conda create -n zzx-ai-agent python=3.11
 langchain==0.3.28
 langchain-community==0.3.31
 langchain-core==0.3.86
