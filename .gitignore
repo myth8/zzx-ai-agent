@@ -17,3 +17,20 @@ bin-release/
 # should NOT be excluded as they contain compiler settings and other important
 # information for Eclipse / Flash Builder.
 /zzx-ai-agent-backend/chroma_db/
+
+# Local environment files may contain credentials.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+!**/.env.*.example
+
+# Runtime logs
+*.log
+logs/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

@@ -224,7 +224,7 @@ class RAGEngine:
         执行多路召回 → 加权 RRF 融合 → Cross-Encoder 重排序 → 返回最终结果。
         """
         print("\n" + "🔍" * 20)
-        print(f"📝 查询语句: {query_text}")
+        print(f"📝 已接收查询，字符数: {len(query_text)}")
         print("🔍" * 20)
 
         # ---------- 1. 向量检索 ----------

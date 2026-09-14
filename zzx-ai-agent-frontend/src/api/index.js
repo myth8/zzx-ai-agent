@@ -1,9 +1,8 @@
 import axios from 'axios'
 
-// API base URL based on environment
-const API_BASE_URL = process.env.NODE_ENV === 'production'
-  ? '/api'
-  : 'http://localhost:8123/api'
+// VITE_ variables are public build-time values and must never contain secrets.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? '/api' : 'http://localhost:8123/api')
 
 const request = axios.create({
   baseURL: API_BASE_URL,

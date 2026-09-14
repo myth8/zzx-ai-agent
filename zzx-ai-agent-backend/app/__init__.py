@@ -4,22 +4,30 @@ from flask import Flask
 from flask import jsonify
 
 
-def create_app():
+def create_app(config_object=None, initialize_database=True):
     """Flask application factory."""
     # Add local lib path for pymysql (installed via --target)
     _lib = os.path.join(os.path.dirname(__file__), "..", "pylib")
     if os.path.isdir(_lib) and _lib not in sys.path:
         sys.path.insert(0, _lib)
 
+    from app.config import Config
+    from app.utils.logging_config import configure_logging
+
+    selected_config = config_object or Config
+    selected_config.validate()
+    configure_logging(selected_config.LOG_LEVEL)
+
     app = Flask(__name__)
-    app.config.from_object("app.config.Config")
+    app.config.from_object(selected_config)
 
     # Initialise database tables on startup
-    with app.app_context():
-        from app.auth import init_db
-        from app.chat_history import init_tables as init_chat_tables
-        init_db()
-        init_chat_tables()
+    if initialize_database:
+        with app.app_context():
+            from app.auth import init_db
+            from app.chat_history import init_tables as init_chat_tables
+            init_db()
+            init_chat_tables()
 
     # Minimal CORS via after_request
     @app.after_request
@@ -42,7 +50,10 @@ def create_app():
     # Health check
     @app.route("/api/health")
     def health():
-        from app.config import Config
-        return jsonify({"status": "ok", "mode": Config.SYSTEM_NAME})
+        return jsonify({
+            "status": "ok",
+            "mode": app.config["SYSTEM_NAME"],
+            "environment": app.config["APP_ENV"],
+        })
 
     return app

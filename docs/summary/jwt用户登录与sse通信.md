@@ -37,29 +37,26 @@ JWT 用户登录体系在项目中承担以下职责：
 
 #### 1.3.1 配置层
 
-JWT 密钥和数据库连接信息在 `app/config.py` 中集中管理：
+JWT 密钥和数据库连接信息通过环境变量注入，并在 `app/config.py` 中集中读取：
 
 ```python
 # app/config.py
-class Config:
-    # MySQL
-    MYSQL_HOST = "127.0.0.1"
-    MYSQL_PORT = 3306
-    MYSQL_USER = "root"
-    MYSQL_PASSWORD = "underdog"
-    MYSQL_DB = "zzx_agent_db"
-
-    # JWT
-    JWT_SECRET = "zzx-ai-jwt-secret-2026"
+class BaseConfig:
+    MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
+    MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+    MYSQL_USER = os.getenv("MYSQL_USER", "")
+    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
+    MYSQL_DB = os.getenv("MYSQL_DB", "zzx_agent_db")
+    JWT_SECRET = os.getenv("JWT_SECRET", "")
 ```
 
 **参数说明：**
 
-| 参数 | 值                      | 说明 |
-| :--- |:-----------------------| :--- |
-| `JWT_SECRET` | zzx-ai-jwt-secret-2026 | Token 签名密钥，生产环境应替换为更复杂的值 |
-| Token 有效期 | 7 天（86400 × 7 秒）       | 在 `make_token` 中通过 `exp` 字段设定 |
-| 签名算法 | HS256                  | PyJWT 库默认支持的对称签名算法 |
+| 参数 | 值 | 说明 |
+| :--- | :--- | :--- |
+| `JWT_SECRET` | 由环境变量提供 | Token 签名密钥，必须使用随机高强度值 |
+| Token 有效期 | 7 天（86400 × 7 秒） | 在 `make_token` 中通过 `exp` 字段设定 |
+| 签名算法 | HS256 | PyJWT 库支持的对称签名算法 |
 
 #### 1.3.2 数据库模型
 
@@ -90,8 +87,8 @@ def get_db():
     return pymysql.connect(
         host=cfg.get("MYSQL_HOST", "127.0.0.1"),
         port=cfg.get("MYSQL_PORT", 3306),
-        user=cfg.get("MYSQL_USER", "root"),
-        password=cfg.get("MYSQL_PASSWORD", ""),
+        user=cfg["MYSQL_USER"],
+        password=cfg["MYSQL_PASSWORD"],
         database=cfg.get("MYSQL_DB", "zzx_agent_db"),
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
@@ -107,7 +104,7 @@ def get_db():
 # app/auth.py
 def make_token(user_id, username):
     import jwt as pyjwt
-    secret = current_app.config.get("JWT_SECRET", "zzx-ai-secret-key")
+    secret = current_app.config["JWT_SECRET"]
     payload = {
         "user_id":  user_id,
         "username": username,
@@ -126,7 +123,7 @@ def make_token(user_id, username):
 # app/auth.py
 def decode_token(token):
     import jwt as pyjwt
-    secret = current_app.config.get("JWT_SECRET", "zzx-ai-secret-key")
+    secret = current_app.config["JWT_SECRET"]
     try:
         return pyjwt.decode(token, secret, algorithms=["HS256"])
     except Exception:

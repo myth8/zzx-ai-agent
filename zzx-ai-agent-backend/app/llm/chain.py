@@ -7,10 +7,12 @@ Chain 实现
 数据流：
   ChatPromptTemplate (system + user) → ChatOpenAI → StrOutputParser → 文本块
 """
-import sys
+import logging
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from app.llm import llm
+
+logger = logging.getLogger(__name__)
 
 
 def make_chain(system_prompt, context=""):
@@ -56,9 +58,11 @@ def stream_chain(chain, message, context="", session_id="", llm_ref=None):
     产出：
         str: LLM 输出的 token 级别文本块
     """
-    print(f"\n{'─'*60}", flush=True)
-    print(f"[Chain] session={session_id} | Input: {message}", flush=True)
-    print(f"{'─'*60}", flush=True)
+    logger.info(
+        "Chain started session=%s input_chars=%s",
+        session_id or "-",
+        len(message),
+    )
     final_answer = ''
 
     invoke_input = {"input": message}
@@ -71,8 +75,11 @@ def stream_chain(chain, message, context="", session_id="", llm_ref=None):
             final_answer += chunk
             yield chunk
 
-    print(f"[Chain] session={session_id} | final_answer: {final_answer[:100]}...", flush=True)
-    print("", flush=True)  # 换行
+    logger.info(
+        "Chain completed session=%s output_chars=%s",
+        session_id or "-",
+        len(final_answer),
+    )
 
     # 如果提供了 session_id，则保存消息并触发摘要生成
     if session_id:
@@ -81,5 +88,5 @@ def stream_chain(chain, message, context="", session_id="", llm_ref=None):
             save_message(session_id, "assistant", final_answer)
             if llm_ref:
                 update_summary(session_id)
-        except Exception as e:
-            print(f"[Chain] save error: {e}", flush=True)
+        except Exception:
+            logger.exception("Chain result persistence failed session=%s", session_id)

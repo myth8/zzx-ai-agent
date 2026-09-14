@@ -129,10 +129,10 @@ async def get_weather(location: str) -> dict:
     Returns:
         包含实时天气信息的字典，包括温度、天气现象、更新时间等
     """
-    logger.info(f"Weather query: {location}")
+    logger.info("Weather query received location_chars=%s", len(location))
     url = "https://api.seniverse.com/v3/weather/now.json"
     params = {
-        "key": "S6RhdAuuJQduDCSig",   # 心知天气 API Key
+        "key": os.environ["SENIVERSE_API_KEY"],
         "location": location,
         "language": "zh-Hans",
         "unit": "c",                   # 摄氏度

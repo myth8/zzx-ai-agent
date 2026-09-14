@@ -44,7 +44,7 @@ def init_db():
 def make_token(user_id, username):
     """Generate a simple JWT token (HS256)."""
     import jwt as pyjwt
-    secret = current_app.config.get("JWT_SECRET", "zzx-ai-secret-key")
+    secret = current_app.config["JWT_SECRET"]
     payload = {
         "user_id":  user_id,
         "username": username,
@@ -56,7 +56,7 @@ def make_token(user_id, username):
 def decode_token(token):
     """Decode JWT token, return payload or None."""
     import jwt as pyjwt
-    secret = current_app.config.get("JWT_SECRET", "zzx-ai-secret-key")
+    secret = current_app.config["JWT_SECRET"]
     try:
         return pyjwt.decode(token, secret, algorithms=["HS256"])
     except Exception:

@@ -10,13 +10,15 @@ Data flow:
   Prompt (system + tools + scratchpad) -> ChatOpenAI -> ReAct output parser
   -> tool_execute -> observe -> loop until Final Answer
 """
-import sys
+import logging
 from datetime import datetime
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool
 from app.llm import llm
 import re
+
+logger = logging.getLogger(__name__)
 
 @tool
 def get_time():
@@ -168,9 +170,11 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
         str: Event strings for SSE - either "[THINK] <msg>"
              or the final answer text.
     """
-    print(f"\n{'='*60}", flush=True)
-    print(f"[Agent] session={session_id} | Input: {message}", flush=True)
-    print(f"{'='*60}", flush=True)
+    logger.info(
+        "Agent started session=%s input_chars=%s",
+        session_id or "-",
+        len(message),
+    )
     final_answer = ""
 
     for step in executor.stream({"input": message}):
@@ -181,22 +185,28 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
                 # 提取 Thought 内容
                 thought_text = extract_thought(action.log) if hasattr(action, 'log') else ""
                 if thought_text:
-                    print(f"  |- Thought: {thought_text}")
                     yield f"[THINK] 思考:{thought_text}"
-                print(f"  |- Tool  : {action.tool}")
-                print(f"  |- Input : {action.tool_input}")
+                logger.info(
+                    "Agent tool started session=%s tool=%s",
+                    session_id or "-",
+                    action.tool,
+                )
         for s in steps:
             obs = s.observation.strip() if s.observation else ""
             if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
-                print(f"  |- Obs   : {obs[:200]}")
                 tool_name = getattr(s.action, 'tool', '?') if hasattr(s, 'action') and s.action else '?'
                 tool_in = getattr(s.action, 'tool_input', '') if hasattr(s, 'action') and s.action else ''
                 yield f"[STEP] 工具: {tool_name} 输入: {tool_in} 结果: {obs[:300]}"
         if "output" in step:
             answer = step["output"]
             final_answer = answer
-            print(f"\n  -- Final Answer:\n{answer}\n", flush=True)
             yield f"[FINAL] {answer}"
+
+    logger.info(
+        "Agent completed session=%s output_chars=%s",
+        session_id or "-",
+        len(final_answer),
+    )
 
     # Save messages and trigger summary if we have a session_id
     if session_id and final_answer:
@@ -205,5 +215,5 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
             save_message(session_id, "assistant", final_answer)
             if llm_ref:
                 update_summary(session_id)
-        except Exception as e:
-            print(f"[Agent] save error: {e}", flush=True)
+        except Exception:
+            logger.exception("Agent result persistence failed session=%s", session_id)

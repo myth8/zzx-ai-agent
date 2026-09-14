@@ -7,7 +7,7 @@
       <sourceFolder url="file://$MODULE_DIR$/zzx-ai-agent-frontend" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/zzx_mcp_server" isTestSource="false" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.11 (2)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="/opt/anaconda3/envs/zzx-ai-agent" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
