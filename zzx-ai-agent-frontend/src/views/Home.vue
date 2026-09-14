@@ -1,57 +1,91 @@
-﻿<template>
-  <div class="home-container">
-    <!-- User info bar -->
-    <div class="user-bar" v-if="user">
-      <div class="user-avatar">{{ user.nickname.charAt(0) }}</div>
-      <div class="user-meta">
-        <span class="user-nick">{{ user.nickname }}</span>
-        <span class="user-name">@{{ user.username }}</span>
-      </div>
-      <button class="logout-btn" @click="handleLogout" title="退出登录">退出</button>
-    </div>
+<template>
+  <div class="home">
+    <div class="aurora aurora-one"></div>
+    <div class="aurora aurora-two"></div>
 
-    <div class="header">
-      <div class="glitch-wrapper">
-        <h1 class="glitch-title">ZZX-AI超级智能体</h1>
+    <nav class="nav">
+      <div class="brand-mark">
+        <span class="brand-orb">Z</span>
+        <span>ZZX AI Agent</span>
       </div>
-      <p class="subtitle">/ 探索AI的无限可能 /</p>
-      <div class="cyber-line"></div>
-    </div>
-    
-    <div class="apps-container">
-      <div class="app-card" @click="navigateTo('/love-master')">
-        <div class="card-glow"></div>
-        <div class="app-icon love-icon">❤️</div>
-        <div class="app-info">
-          <div class="app-title">AI恋爱大师</div>
-          <div class="app-desc">智能情感顾问，帮你解答恋爱烦恼</div>
+      <div class="nav-right" v-if="user">
+        <span class="online-pill"><i></i>智能体在线</span>
+        <div class="user-chip">
+          <span class="user-avatar">{{ user.nickname.charAt(0) }}</span>
+          <span class="user-copy"><b>{{ user.nickname }}</b><small>@{{ user.username }}</small></span>
         </div>
-        <div class="app-button">
-          <span class="btn-text">立即体验</span>
-          <span class="btn-icon">→</span>
-        </div>
+        <button class="icon-button" @click="handleLogout" title="退出登录" aria-label="退出登录">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H5.8A1.8 1.8 0 0 0 4 6.8v10.4A1.8 1.8 0 0 0 5.8 19H9"/><path d="m15 16 4-4-4-4M19 12H9"/></svg>
+        </button>
       </div>
-      
-      <div class="app-card" @click="navigateTo('/super-agent')">
-        <div class="card-glow"></div>
-        <div class="app-icon robot-icon">🤖</div>
-        <div class="app-info">
-          <div class="app-title">AI超级智能体</div>
-          <div class="app-desc">全能型AI助手，解决各类专业问题</div>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <div class="hero-kicker"><span>02</span> 个专属智能体已就绪</div>
+        <h1>今天，想和哪个<br><span>智能体</span>一起思考？</h1>
+        <p>从细腻的情感建议到复杂任务的自主规划，让合适的智能体接住你的每一个问题。</p>
+        <div class="hero-meta">
+          <span><i class="dot green"></i>系统正常</span>
+          <span><i class="dot cyan"></i>MCP 已连接</span>
+          <span><i class="dot violet"></i>长期对话</span>
         </div>
-        <div class="app-button">
-          <span class="btn-text">立即体验</span>
-          <span class="btn-icon">→</span>
-        </div>
-      </div>
-    </div>
-    
-    <div class="cyber-circles">
-      <div class="circle circle-1"></div>
-      <div class="circle circle-2"></div>
-      <div class="circle circle-3"></div>
-    </div>
-    
+      </section>
+
+      <section class="agent-grid" aria-label="选择智能体">
+        <article class="agent-card love-card" tabindex="0" @click="navigateTo('/love-master')" @keyup.enter="navigateTo('/love-master')">
+          <div class="card-topline">
+            <span class="agent-state"><i></i>AVAILABLE</span>
+            <span class="agent-index">AGENT / 01</span>
+          </div>
+          <div class="agent-visual love-visual">
+            <svg viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <circle cx="60" cy="60" r="42" stroke="currentColor" stroke-opacity=".18"/>
+              <circle cx="60" cy="60" r="29" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 5"/>
+              <path d="M60 82S34 67 34 49.5C34 39.8 41.4 34 49 34c5.2 0 9.2 2.8 11 6.4 1.8-3.6 5.8-6.4 11-6.4 7.6 0 15 5.8 15 15.5C86 67 60 82 60 82Z" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="agent-tag">EMOTIONAL INTELLIGENCE</div>
+          <h2>AI 恋爱大师</h2>
+          <p>理解关系里的言外之意，提供温柔、清醒且有边界感的情感建议。</p>
+          <div class="skill-row"><span>关系分析</span><span>表达建议</span><span>情绪陪伴</span></div>
+          <button class="enter-button" aria-label="进入 AI 恋爱大师">
+            <span>开始对话</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </article>
+
+        <article class="agent-card super-card" tabindex="0" @click="navigateTo('/super-agent')" @keyup.enter="navigateTo('/super-agent')">
+          <div class="card-topline">
+            <span class="agent-state"><i></i>AVAILABLE</span>
+            <span class="agent-index">AGENT / 02</span>
+          </div>
+          <div class="agent-visual super-visual">
+            <svg viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <circle cx="60" cy="60" r="43" stroke="currentColor" stroke-opacity=".16"/>
+              <path d="M42 43h36v34H42z" stroke="currentColor" stroke-width="3"/>
+              <circle cx="52" cy="58" r="4" fill="currentColor"/><circle cx="68" cy="58" r="4" fill="currentColor"/>
+              <path d="M51 69h18M60 43V32M55 32h10M35 52h7M78 52h7" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="agent-tag">AUTONOMOUS REASONING</div>
+          <h2>AI 超级智能体</h2>
+          <p>拆解复杂目标，调用 MCP 工具，边思考边执行，交付可用的最终结果。</p>
+          <div class="skill-row"><span>深度推理</span><span>任务规划</span><span>工具调用</span></div>
+          <button class="enter-button" aria-label="进入 AI 超级智能体">
+            <span>开启任务</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </article>
+      </section>
+
+      <section class="value-strip">
+        <div><strong>上下文记忆</strong><span>延续每一次有价值的对话</span></div>
+        <div><strong>流式响应</strong><span>实时呈现智能体思考进度</span></div>
+        <div><strong>MCP 工具生态</strong><span>从回答问题到真正执行任务</span></div>
+      </section>
+    </main>
+
     <AppFooter />
   </div>
 </template>
@@ -62,23 +96,12 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import AppFooter from '../components/AppFooter.vue'
 
-// 设置页面标题和元数据
 useHead({
-  title: 'ZZX-AI超级智能体 - 首页',
-  meta: [
-    {
-      name: 'description',
-      content: 'ZZX-AI超级智能体提供AI恋爱大师和AI超级智能体服务，满足您的各种AI对话需求'
-    },
-    {
-      name: 'keywords',
-      content: 'AI智能体,AI应用,AI恋爱大师,AI助手,智能对话,ZZX,AI超级智能体,首页'
-    }
-  ]
+  title: 'ZZX AI Agent - 智能体工作台',
+  meta: [{ name: 'description', content: '选择你的专属 AI 智能体，获得专业建议、深度推理与任务执行能力。' }]
 })
 
 const router = useRouter()
-
 const user = ref(null)
 
 onMounted(() => {
@@ -88,9 +111,7 @@ onMounted(() => {
   }
 })
 
-const navigateTo = (path) => {
-  router.push(path)
-}
+const navigateTo = (path) => router.push(path)
 
 function handleLogout() {
   localStorage.removeItem('token')
@@ -100,517 +121,103 @@ function handleLogout() {
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&display=swap');
-
-/* 全局样式变量 */
-:root {
-  --neon-blue: #00f0ff;
-  --neon-purple: #9000ff;
-  --neon-pink: #ff00d4;
-  --cyber-black: #0a0a12;
-  --cyber-dark: #111122;
-  --cyber-light: #edf7ff;
-}
-
-.home-container {
-  display: flex;
-  flex-direction: column;
+.home {
+  position: relative;
   min-height: 100vh;
-  background-color: var(--cyber-dark);
-  background-image: 
-    linear-gradient(0deg, rgba(8, 17, 34, 0.9), rgba(5, 8, 20, 0.9)),
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="1" fill="%23111133" opacity="0.3"/><rect x="0" y="0" width="1" height="100" fill="%23111133" opacity="0.3"/></svg>');
-  background-size: auto, 40px 40px;
-  position: relative;
   overflow: hidden;
+  background:
+    linear-gradient(rgba(103,232,249,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103,232,249,.025) 1px, transparent 1px),
+    #070b16;
+  background-size: 54px 54px;
 }
 
-/* 赛博朋克风格标题 */
-.header {
-  padding: 50px 20px 50px;
-  text-align: center;
-  background-color: transparent;
+.aurora { position: absolute; border-radius: 50%; filter: blur(110px); opacity: .15; pointer-events: none; }
+.aurora-one { width: 520px; height: 520px; top: -260px; left: 7%; background: #22d3ee; }
+.aurora-two { width: 580px; height: 580px; top: 240px; right: -280px; background: #8b5cf6; }
+
+.nav {
   position: relative;
-  z-index: 2;
-}
-
-.glitch-wrapper {
-  position: relative;
-  display: inline-block;
-  margin-bottom: 20px;
-}
-
-.glitch-title {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 3.2rem;
-  font-weight: 700;
-  color: var(--cyber-light);
-  text-shadow: 
-    0 0 5px rgba(0, 240, 255, 0.7),
-    0 0 10px rgba(0, 240, 255, 0.5),
-    0 0 20px rgba(0, 240, 255, 0.3);
-  letter-spacing: 2px;
-  position: relative;
-  animation: glitch 3s infinite;
-}
-
-.glitch-title::before,
-.glitch-title::after {
-  content: 'ZZX-AI超级智能体';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.8;
-}
-
-.glitch-title::before {
-  color: var(--neon-pink);
-  z-index: -1;
-  animation: glitch-anim 2s infinite;
-}
-
-.glitch-title::after {
-  color: var(--neon-blue);
-  z-index: -2;
-  animation: glitch-anim-2 3s infinite;
-}
-
-.subtitle {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 1.2rem;
-  color: rgba(255, 255, 255, 0.7);
-  max-width: 600px;
-  margin: 0 auto 20px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-}
-
-.cyber-line {
-  height: 2px;
-  width: 80%;
-  max-width: 600px;
+  z-index: 3;
+  max-width: 1240px;
+  height: 88px;
   margin: 0 auto;
-  background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
-  position: relative;
-}
-
-.cyber-line::before,
-.cyber-line::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  background-color: var(--neon-blue);
-  border-radius: 50%;
-  transform: translateY(-50%);
-  box-shadow: 0 0 10px 2px var(--neon-blue);
-}
-
-.cyber-line::before {
-  left: 20%;
-}
-
-.cyber-line::after {
-  right: 20%;
-}
-
-.apps-container {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 50px;
-  max-width: 1200px;
-  margin: 60px auto;
-  padding: 0 20px;
-  flex: 1;
-  position: relative;
-  z-index: 2;
-}
-
-.app-card {
-  width: 340px;
-  background-color: rgba(17, 23, 41, 0.7);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-  box-shadow: 
-    0 8px 32px rgba(0, 240, 255, 0.2),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  padding: 30px;
-  cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-}
-
-.card-glow {
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(
-    circle at center,
-    rgba(var(--neon-blue-rgb), 0.1) 0%,
-    transparent 70%
-  );
-  opacity: 0;
-  transition: opacity 0.5s;
-  pointer-events: none;
-}
-
-.app-card:hover {
-  transform: translateY(-15px) scale(1.03);
-  box-shadow: 
-    0 15px 50px rgba(0, 240, 255, 0.3),
-    inset 0 0 0 1px rgba(0, 240, 255, 0.5);
-}
-
-.app-card:hover .card-glow {
-  opacity: 1;
-}
-
-.app-icon {
-  font-size: 4rem;
-  margin-bottom: 25px;
-  width: 90px;
-  height: 90px;
+  padding: 0 28px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  position: relative;
-  z-index: 1;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
 }
+.nav-right, .user-chip { display: flex; align-items: center; }
+.nav-right { gap: 18px; }
+.online-pill { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.online-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); }
+.user-chip { gap: 10px; padding-left: 18px; border-left: 1px solid var(--line); }
+.user-avatar { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid rgba(103,232,249,.3); border-radius: 11px; color: var(--primary); background: rgba(103,232,249,.08); font-weight: 700; }
+.user-copy { display: flex; flex-direction: column; gap: 2px; }
+.user-copy b { font-size: 13px; }
+.user-copy small { color: var(--muted); font-size: 11px; }
+.icon-button { width: 36px; height: 36px; display: grid; place-items: center; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 10px; transition: .2s; }
+.icon-button svg { width: 17px; }
+.icon-button:hover { color: var(--text); border-color: var(--line-strong); background: rgba(255,255,255,.04); }
 
-.love-icon {
-  background: linear-gradient(135deg, #ff007a, #ff5722);
-  box-shadow: 0 0 20px rgba(255, 0, 122, 0.5);
-}
+main { position: relative; z-index: 2; max-width: 1184px; margin: 0 auto; padding: 92px 28px 110px; }
+.hero { max-width: 850px; margin-bottom: 64px; }
+.hero-kicker { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.hero-kicker span { color: #07101b; padding: 4px 8px; border-radius: 5px; background: var(--primary); letter-spacing: 0; }
+.hero h1 { margin-top: 24px; font: 800 clamp(48px, 7vw, 82px)/1.05 'Manrope', sans-serif; letter-spacing: -.065em; }
+.hero h1 span { color: transparent; background: linear-gradient(90deg, #67e8f9, #a78bfa 72%); background-clip: text; -webkit-background-clip: text; }
+.hero > p { max-width: 660px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.8; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 32px; color: #69778f; font-size: 12px; }
+.hero-meta span { display: flex; align-items: center; gap: 8px; }
+.dot { width: 5px; height: 5px; border-radius: 50%; }
+.green { background: var(--success); }.cyan { background: var(--primary); }.violet { background: var(--violet); }
 
-.robot-icon {
-  background: linear-gradient(135deg, #00b2ff, #4f56ff);
-  box-shadow: 0 0 20px rgba(0, 178, 255, 0.5);
-}
+.agent-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
+.agent-card { --accent: var(--primary); position: relative; min-height: 560px; padding: 28px; overflow: hidden; background: linear-gradient(145deg, rgba(18,28,49,.88), rgba(10,16,31,.94)); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); cursor: pointer; transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease; }
+.agent-card::before { content: ''; position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 47%); transition: opacity .3s; }
+.agent-card:hover, .agent-card:focus-visible { transform: translateY(-8px); border-color: color-mix(in srgb, var(--accent) 38%, transparent); box-shadow: 0 32px 90px rgba(0,0,0,.46); outline: none; }
+.agent-card:hover::before, .agent-card:focus-visible::before { opacity: 1; }
+.love-card { --accent: var(--love); }.super-card { --accent: var(--primary); }
+.card-topline { position: relative; z-index: 1; display: flex; justify-content: space-between; color: #65728a; font: 700 10px/1 'Manrope', sans-serif; letter-spacing: .13em; }
+.agent-state { display: flex; align-items: center; gap: 7px; color: color-mix(in srgb, var(--accent) 75%, white); }
+.agent-state i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 9px var(--accent); }
+.agent-visual { position: relative; z-index: 1; height: 190px; display: grid; place-items: center; margin: 18px -8px 10px; color: var(--accent); }
+.agent-visual::before { content: ''; position: absolute; width: 150px; height: 150px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 9%, transparent); filter: blur(4px); }
+.agent-visual svg { position: relative; width: 150px; height: 150px; filter: drop-shadow(0 0 24px color-mix(in srgb, var(--accent) 35%, transparent)); }
+.agent-tag { position: relative; z-index: 1; color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.agent-card h2 { position: relative; z-index: 1; margin-top: 12px; font: 800 30px/1.2 'Manrope', sans-serif; letter-spacing: -.035em; }
+.agent-card > p { position: relative; z-index: 1; min-height: 56px; margin-top: 12px; color: var(--muted); line-height: 1.75; }
+.skill-row { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.skill-row span { padding: 7px 10px; color: #aeb9cc; background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
+.enter-button { position: relative; z-index: 1; width: 100%; height: 50px; display: flex; align-items: center; justify-content: space-between; margin-top: 26px; padding: 0 18px; color: var(--text); background: color-mix(in srgb, var(--accent) 9%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 12px; font-weight: 700; transition: .2s; }
+.enter-button svg { width: 18px; transition: transform .2s; }
+.agent-card:hover .enter-button { color: #07101b; background: var(--accent); border-color: var(--accent); }
+.agent-card:hover .enter-button svg { transform: translateX(4px); }
 
-.app-info {
-  text-align: center;
-  margin-bottom: 30px;
-  width: 100%;
-}
+.value-strip { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 24px; padding: 26px 30px; background: rgba(12,18,34,.65); border: 1px solid var(--line); border-radius: 18px; }
+.value-strip div { display: flex; flex-direction: column; gap: 6px; padding: 0 26px; border-right: 1px solid var(--line); }
+.value-strip div:first-child { padding-left: 0; }.value-strip div:last-child { border: 0; }
+.value-strip strong { font-size: 13px; }.value-strip span { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
-.app-title {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 1.6rem;
-  font-weight: bold;
-  color: white;
-  margin-bottom: 12px;
-  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
-}
-
-.app-desc {
-  font-size: 1rem;
-  color: rgba(255, 255, 255, 0.7);
-  line-height: 1.6;
-}
-
-.app-button {
-  background: linear-gradient(90deg, #0088ff, #00b2ff);
-  color: white;
-  padding: 12px 28px;
-  border-radius: 30px;
-  font-weight: 500;
-  transition: all 0.3s;
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(0, 240, 255, 0.3);
-}
-
-.app-button::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.7s;
-}
-
-.app-button:hover {
-  box-shadow: 0 0 15px rgba(0, 178, 255, 0.7);
-  transform: scale(1.05);
-}
-
-.app-button:hover::before {
-  left: 100%;
-}
-
-.btn-text {
-  margin-right: 8px;
-  letter-spacing: 1px;
-}
-
-.btn-icon {
-  font-size: 1.2rem;
-  transition: transform 0.3s;
-}
-
-.app-button:hover .btn-icon {
-  transform: translateX(4px);
-}
-
-/* 背景圆圈动画 */
-.cyber-circles {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  z-index: 1;
-}
-
-.circle {
-  position: absolute;
-  border-radius: 50%;
-  opacity: 0.15;
-}
-
-.circle-1 {
-  width: 300px;
-  height: 300px;
-  top: -100px;
-  right: -100px;
-  background: linear-gradient(135deg, var(--neon-blue), var(--neon-purple));
-  animation: float 15s infinite alternate;
-}
-
-.circle-2 {
-  width: 500px;
-  height: 500px;
-  bottom: -200px;
-  left: -200px;
-  background: linear-gradient(135deg, var(--neon-purple), var(--neon-pink));
-  animation: float 20s infinite alternate-reverse;
-}
-
-.circle-3 {
-  width: 200px;
-  height: 200px;
-  top: 40%;
-  right: 15%;
-  background: linear-gradient(135deg, var(--neon-pink), var(--neon-blue));
-  animation: float 12s infinite alternate;
-}
-
-/* 动画效果 */
-@keyframes float {
-  0% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-  100% {
-    transform: translate(50px, 50px) rotate(10deg);
-  }
-}
-
-@keyframes glitch {
-  0% {
-    text-shadow: 
-      0 0 5px rgba(0, 240, 255, 0.7),
-      0 0 10px rgba(0, 240, 255, 0.5);
-  }
-  50% {
-    text-shadow: 
-      0 0 5px rgba(0, 240, 255, 0.7),
-      0 0 10px rgba(0, 240, 255, 0.5),
-      0 0 20px rgba(0, 240, 255, 0.3);
-  }
-  100% {
-    text-shadow: 
-      0 0 5px rgba(0, 240, 255, 0.7),
-      0 0 10px rgba(0, 240, 255, 0.5);
-  }
-}
-
-@keyframes glitch-anim {
-  0%, 100% {
-    transform: translate(0);
-  }
-  20% {
-    transform: translate(-5px, 5px);
-  }
-  40% {
-    transform: translate(-5px, -5px);
-  }
-  60% {
-    transform: translate(5px, 5px);
-  }
-  80% {
-    transform: translate(5px, -5px);
-  }
-}
-
-@keyframes glitch-anim-2 {
-  0%, 100% {
-    transform: translate(0);
-  }
-  20% {
-    transform: translate(3px, -3px);
-  }
-  40% {
-    transform: translate(3px, 3px);
-  }
-  60% {
-    transform: translate(-3px, -3px);
-  }
-  80% {
-    transform: translate(-3px, 3px);
-  }
-}
-
-/* 响应式设计 */
-/* User info bar */
-.user-bar {
-  position: absolute;
-  top: 16px;
-  right: 20px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(17, 23, 41, 0.75);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 30px;
-  padding: 6px 6px 6px 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  transition: box-shadow 0.3s;
-}
-.user-bar:hover {
-  box-shadow: 0 4px 24px rgba(0, 240, 255, 0.15);
-}
-.user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #00f0ff, #0088ff);
-  color: #fff;
-  font-size: 0.85rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
-}
-.user-meta {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-.user-nick {
-  color: #edf7ff;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-.user-name {
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 0.7rem;
-}
-.logout-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.78rem;
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: all 0.25s;
-  font-family: inherit;
-}
-.logout-btn:hover {
-  background: rgba(255, 71, 87, 0.2);
-  border-color: rgba(255, 71, 87, 0.4);
-  color: #ff4757;
-}
-@media (max-width: 768px) {
-  .user-meta { display: none; }
-  .glitch-title {
-    font-size: 2.5rem;
-  }
-  
-  .subtitle {
-    font-size: 1rem;
-  }
-  
-  .apps-container {
-    gap: 30px;
-    margin: 40px auto;
-  }
-  
-  .app-card {
-    width: 100%;
-    max-width: 420px;
-    padding: 25px;
-  }
-  
-  .app-icon {
-    font-size: 3.5rem;
-    width: 80px;
-    height: 80px;
-  }
+@media (max-width: 800px) {
+  .nav { height: 72px; padding: 0 20px; }
+  .online-pill, .user-copy { display: none; }
+  main { padding: 64px 20px 80px; }
+  .hero { margin-bottom: 44px; }
+  .hero h1 { font-size: clamp(42px, 12vw, 64px); }
+  .agent-grid { grid-template-columns: 1fr; }
+  .agent-card { min-height: 520px; }
+  .value-strip { grid-template-columns: 1fr; gap: 18px; }
+  .value-strip div { padding: 0 0 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .value-strip div:last-child { padding-bottom: 0; }
 }
 
 @media (max-width: 480px) {
-  .user-meta { display: none; }
-  .header {
-    padding: 50px 15px 40px;
-  }
-  
-  .glitch-title {
-    font-size: 2rem;
-  }
-  
-  .subtitle {
-    font-size: 0.9rem;
-    letter-spacing: 2px;
-  }
-  
-  .apps-container {
-    margin: 30px auto;
-    padding: 0 15px;
-  }
-  
-  .app-card {
-    padding: 20px;
-  }
-  
-  .app-icon {
-    font-size: 3rem;
-    margin-bottom: 20px;
-    width: 70px;
-    height: 70px;
-  }
-  
-  .app-title {
-    font-size: 1.4rem;
-  }
-  
-  .app-desc {
-    font-size: 0.9rem;
-  }
-  
-  .circle-1, .circle-2, .circle-3 {
-    opacity: 0.1;
-  }
+  .brand-mark > span:last-child { display: none; }
+  .user-chip { padding-left: 0; border: 0; }
+  .hero-meta { gap: 14px; }
+  .agent-card { min-height: auto; padding: 22px; }
+  .agent-visual { height: 155px; }
 }
-</style> 
+</style>

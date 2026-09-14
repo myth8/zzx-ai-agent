@@ -1,6 +1,6 @@
 # conda create -n zzx-ai-agent python=3.11
 fastmcp==3.4.4
 httpx==0.28.1
-mcp==3.4.4
+mcp==1.30.0
 langchain-mcp-adapters==0.1.14
 langchain-huggingface==0.3.1

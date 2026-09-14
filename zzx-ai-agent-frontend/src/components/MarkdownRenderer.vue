@@ -122,7 +122,7 @@ function renderMarkdown(text) {
 
 <style scoped>
 .markdown-body {
-  line-height: 1.6;
+  line-height: 1.72;
   word-break: break-word;
 }
 </style>
@@ -130,7 +130,7 @@ function renderMarkdown(text) {
 <style>
 /* Global (unscoped) styles for rendered markdown HTML */
 .markdown-body p {
-  margin: 0.3em 0;
+  margin: 0.36em 0;
 }
 .markdown-body strong {
   font-weight: 700;
@@ -139,16 +139,20 @@ function renderMarkdown(text) {
   font-style: italic;
 }
 .markdown-body code {
-  background: rgba(0,0,0,0.06);
-  padding: 0.15em 0.4em;
-  border-radius: 4px;
+  color: #c4f5fb;
+  background: rgba(103,232,249,0.08);
+  border: 1px solid rgba(103,232,249,0.1);
+  padding: 0.16em 0.42em;
+  border-radius: 5px;
   font-size: 0.88em;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 .markdown-body pre {
-  background: rgba(0,0,0,0.06);
-  padding: 12px;
-  border-radius: 8px;
+  color: #d7e2f2;
+  background: #09101d;
+  border: 1px solid rgba(148,163,184,.14);
+  padding: 14px;
+  border-radius: 10px;
   overflow-x: auto;
   margin: 0.5em 0;
   font-size: 0.85em;
@@ -169,12 +173,12 @@ function renderMarkdown(text) {
   margin: 0.15em 0;
 }
 .markdown-body a {
-  color: #007bff;
+  color: #67e8f9;
   text-decoration: underline;
 }
 .markdown-body hr {
   border: none;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid rgba(148,163,184,.2);
   margin: 0.6em 0;
 }
 .markdown-body h2 { font-size: 1.2em; margin: 0.5em 0 0.3em; }
