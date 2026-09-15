@@ -2,6 +2,10 @@
 
 Local values are loaded from zzx-ai-agent-backend/.env and then the repository
 root .env. Existing process environment values always have highest priority.
+
+.env 决定具体配置值。
+APP_ENV 决定使用哪一套配置规则。
+config.py 将二者组合、校验后交给 Flask。
 """
 import os
 from pathlib import Path
