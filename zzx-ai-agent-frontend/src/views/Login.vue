@@ -78,8 +78,9 @@ async function handleLogin() {
       errorMsg.value = res.msg || "登录失败"
       return
     }
-    localStorage.setItem("token", res.data.token)
-    localStorage.setItem("user", JSON.stringify(res.data))
+    const { token, access_token: accessToken, ...profile } = res.data
+    localStorage.setItem("token", accessToken || token)
+    localStorage.setItem("user", JSON.stringify(profile))
     router.push(route.query.redirect || "/")
   } catch (e) {
     errorMsg.value = e.response?.data?.msg || "网络错误，请稍后重试"

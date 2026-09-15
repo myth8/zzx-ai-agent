@@ -60,6 +60,15 @@
               <input id="register-confirm" v-model="form.confirmPassword" type="password" placeholder="再次输入密码" autocomplete="new-password">
             </div>
           </div>
+          <div class="field">
+            <label for="register-invite">管理员邀请码 <span class="optional">选填</span></label>
+            <div class="field-control">
+              <span class="field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M15 4h4v4M12 15h3M14 13v4"/></svg>
+              </span>
+              <input id="register-invite" v-model="form.inviteCode" type="password" placeholder="有邀请码时填写" autocomplete="off">
+            </div>
+          </div>
           <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
           <button type="submit" class="auth-submit" :disabled="loading">
             <span>{{ loading ? '正在创建...' : '创建智能空间' }}</span>
@@ -78,14 +87,20 @@ import { useRouter } from "vue-router"
 import { register } from "../api/index.js"
 
 const router = useRouter()
-const form = reactive({ username: "", nickname: "", password: "", confirmPassword: "" })
+const form = reactive({
+  username: "",
+  nickname: "",
+  password: "",
+  confirmPassword: "",
+  inviteCode: ""
+})
 const errorMsg = ref("")
 const loading = ref(false)
 
 async function handleRegister() {
   errorMsg.value = ""
   if (!form.username.trim() || !form.nickname.trim() || !form.password || !form.confirmPassword) {
-    errorMsg.value = "请填写所有字段"
+    errorMsg.value = "请填写账号、昵称和密码"
     return
   }
   if (form.password !== form.confirmPassword) {
@@ -102,7 +117,12 @@ async function handleRegister() {
   }
   loading.value = true
   try {
-    const res = await register(form.username.trim(), form.nickname.trim(), form.password)
+    const res = await register(
+      form.username.trim(),
+      form.nickname.trim(),
+      form.password,
+      form.inviteCode.trim()
+    )
     if (res.code !== 0) {
       errorMsg.value = res.msg || "注册失败"
       return

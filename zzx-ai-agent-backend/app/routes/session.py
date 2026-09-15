@@ -59,7 +59,9 @@ def rename():
     title = data.get("title", "").strip()
     if not session_id or not title:
         return jsonify({"code": 400, "msg": "参数不完整"}), 400
-    rename_session(session_id, title)
+    user_id = request.current_user["user_id"]
+    if not rename_session(user_id, session_id, title):
+        return jsonify({"code": 404, "msg": "会话不存在"}), 404
     return jsonify({"code": 0, "msg": "更新成功"})
 
 
@@ -67,7 +69,9 @@ def rename():
 @login_required
 def remove(session_id):
     """删除指定会话"""
-    delete_session(session_id)
+    user_id = request.current_user["user_id"]
+    if not delete_session(user_id, session_id):
+        return jsonify({"code": 404, "msg": "会话不存在"}), 404
     return jsonify({"code": 0, "msg": "删除成功"})
 
 
@@ -75,7 +79,11 @@ def remove(session_id):
 @login_required
 def messages(session_id):
     """获取指定会话的所有消息"""
-    rows = get_session_messages(session_id)
+    user_id = request.current_user["user_id"]
+    from app.chat_history import get_user_session
+    if get_user_session(user_id, session_id) is None:
+        return jsonify({"code": 404, "msg": "会话不存在"}), 404
+    rows = get_session_messages(user_id, session_id)
     return jsonify({
         "code": 0,
         "data": [

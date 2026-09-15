@@ -46,7 +46,12 @@ npm run build
 - `/api/ai/love_app/chat/sse` - AI恋爱大师聊天接口
 - `/api/ai/manus/chat` - AI超级智能体聊天接口
 
-后端服务默认运行在 `http://localhost:8123`
+后端服务默认运行在 `http://127.0.0.1:8123`。开发服务器会把浏览器访问的
+`/api` 同源代理到后端，因此即使 Vite 因端口被占用而从 3000 自动切换到
+3001、3002 等端口，也不需要同步修改后端跨域白名单。
+
+如需让浏览器绕过 Vite 直接请求另一个域名的后端，再设置完整的
+`VITE_API_BASE_URL`，并将前端的精确 Origin 加入后端 `CORS_ORIGINS`。
 
 # Vue 3 + Vite
 

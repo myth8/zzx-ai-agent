@@ -2,12 +2,31 @@ import axios from 'axios'
 
 // VITE_ variables are public build-time values and must never contain secrets.
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.PROD ? '/api' : 'http://localhost:8123/api')
+  '/api'
 
 const request = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000
+  timeout: 60000,
+  withCredentials: true
 })
+
+// Refresh requests use an isolated client so a failed refresh cannot recurse
+// through the normal response interceptor.
+const refreshRequest = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 60000,
+  withCredentials: true
+})
+
+let refreshPromise = null
+
+const readCookie = (name) => {
+  const prefix = encodeURIComponent(name) + '='
+  const item = document.cookie
+    .split('; ')
+    .find(value => value.startsWith(prefix))
+  return item ? decodeURIComponent(item.slice(prefix.length)) : ''
+}
 
 // --- request interceptor: attach Bearer token -------------------
 request.interceptors.request.use(config => {
@@ -20,12 +39,87 @@ request.interceptors.request.use(config => {
 
 // --- Auth API ----------------------------------------------------
 
-export const register = (username, nickname, password) => {
-  return request.post('/auth/register', { username, nickname, password }).then(r => r.data)
+export const register = (username, nickname, password, inviteCode = '') => {
+  return request.post('/auth/register', {
+    username,
+    nickname,
+    password,
+    invite_code: inviteCode
+  }).then(r => r.data)
+}
+
+export const redeemAdminInvite = (inviteCode) => {
+  return request.post('/auth/invite/redeem', {
+    invite_code: inviteCode
+  }).then(r => r.data)
 }
 
 export const login = (username, password) => {
   return request.post('/auth/login', { username, password }).then(r => r.data)
+}
+
+export const refreshAccessToken = async () => {
+  const csrfToken = readCookie('csrf_refresh_token')
+  const response = await refreshRequest.post('/auth/refresh', {}, {
+    headers: csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}
+  })
+  const token = response.data?.data?.access_token || response.data?.data?.token
+  if (!token) throw new Error('refresh response did not include an access token')
+  localStorage.setItem('token', token)
+  const currentUser = response.data?.data
+  if (currentUser?.user_id) {
+    const { token: _token, access_token: _accessToken, ...profile } = currentUser
+    localStorage.setItem('user', JSON.stringify(profile))
+  }
+  return token
+}
+
+// Retry one ordinary API request after rotating the refresh token. Concurrent
+// 401 responses share one refresh operation to avoid invalidating each other.
+request.interceptors.response.use(
+  response => response,
+  async error => {
+    const original = error.config
+    const isAuthEndpoint = original?.url?.startsWith('/auth/')
+    if (error.response?.status !== 401 || original?._retry || isAuthEndpoint) {
+      return Promise.reject(error)
+    }
+
+    original._retry = true
+    try {
+      if (!refreshPromise) {
+        refreshPromise = refreshAccessToken().finally(() => {
+          refreshPromise = null
+        })
+      }
+      const token = await refreshPromise
+      original.headers = original.headers || {}
+      original.headers.Authorization = 'Bearer ' + token
+      return request(original)
+    } catch (refreshError) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      return Promise.reject(refreshError)
+    }
+  }
+)
+
+export const logout = async () => {
+  try {
+    return await request.delete('/auth/logout').then(r => r.data)
+  } finally {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+  }
+}
+
+export const logoutAll = async () => {
+  try {
+    return await request.delete('/auth/logout-all').then(r => r.data)
+  } finally {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+  }
 }
 
 export const fetchCurrentUser = () => {
@@ -67,23 +161,76 @@ export const connectSSE = (url, params, onMessage, onError) => {
 
   const fullUrl = API_BASE_URL + url + '?' + queryString
 
-  const eventSource = new EventSource(fullUrl)
+  const abortController = new AbortController()
+  const connection = {
+    onmessage: onMessage
+      ? event => onMessage(event.data)
+      : null,
+    onerror: onError || null,
+    close: () => abortController.abort()
+  }
 
-  eventSource.onmessage = event => {
-    let data = event.data
-    if (data === '[DONE]') {
-      if (onMessage) onMessage('[DONE]')
-    } else {
-      if (onMessage) onMessage(data)
+  const dispatchEventBlock = block => {
+    const data = block
+      .split('\n')
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).replace(/^ /, ''))
+      .join('\n')
+    if (data && connection.onmessage) connection.onmessage({ data })
+  }
+
+  const openStream = async token => {
+    return fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: 'Bearer ' + token
+      },
+      credentials: 'include',
+      signal: abortController.signal
+    })
+  }
+
+  Promise.resolve().then(async () => {
+    try {
+      let token = localStorage.getItem('token')
+      let response = await openStream(token || '')
+      if (response.status === 401) {
+        token = await refreshAccessToken()
+        response = await openStream(token)
+      }
+      if (!response.ok || !response.body) {
+        throw new Error('SSE request failed with status ' + response.status)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+        buffer = buffer.replace(/\r\n/g, '\n')
+
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          dispatchEventBlock(block)
+          boundary = buffer.indexOf('\n\n')
+        }
+        if (done) break
+      }
+
+      if (buffer.trim()) dispatchEventBlock(buffer)
+    } catch (error) {
+      if (error.name !== 'AbortError' && connection.onerror) {
+        connection.onerror(error)
+      }
     }
-  }
+  })
 
-  eventSource.onerror = error => {
-    if (onError) onError(error)
-    eventSource.close()
-  }
-
-  return eventSource
+  return connection
 }
 
 // AI Love Master chat (supports session_id for multi-turn)
@@ -102,5 +249,8 @@ export const chatWithManus = (message, sessionId) => {
 
 export default {
   chatWithLoveApp,
-  chatWithManus
+  chatWithManus,
+  refreshAccessToken,
+  logout,
+  logoutAll
 }

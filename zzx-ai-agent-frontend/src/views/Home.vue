@@ -10,6 +10,10 @@
       </div>
       <div class="nav-right" v-if="user">
         <span class="online-pill"><i></i>智能体在线</span>
+        <button v-if="user.role !== 'admin'" class="invite-button" @click="openInviteDialog">
+          兑换邀请码
+        </button>
+        <span v-else class="admin-pill">ADMIN</span>
         <div class="user-chip">
           <span class="user-avatar">{{ user.nickname.charAt(0) }}</span>
           <span class="user-copy"><b>{{ user.nickname }}</b><small>@{{ user.username }}</small></span>
@@ -86,6 +90,31 @@
       </section>
     </main>
 
+    <div v-if="inviteOpen" class="dialog-backdrop" @click.self="closeInviteDialog">
+      <section class="invite-dialog" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+        <button class="dialog-close" type="button" aria-label="关闭" @click="closeInviteDialog">×</button>
+        <span class="dialog-kicker">ADMIN ACCESS</span>
+        <h2 id="invite-title">兑换管理员邀请码</h2>
+        <p>验证成功后，当前账号将立即获得管理权限。</p>
+        <form @submit.prevent="handleRedeemInvite">
+          <label for="home-invite-code">邀请码</label>
+          <input
+            id="home-invite-code"
+            v-model="inviteCode"
+            type="password"
+            placeholder="请输入管理员邀请码"
+            autocomplete="off"
+            autofocus
+          >
+          <p v-if="inviteError" class="dialog-message error">{{ inviteError }}</p>
+          <p v-if="inviteSuccess" class="dialog-message success">{{ inviteSuccess }}</p>
+          <button class="redeem-button" type="submit" :disabled="inviteLoading || !inviteCode.trim()">
+            {{ inviteLoading ? '正在验证...' : '确认兑换' }}
+          </button>
+        </form>
+      </section>
+    </div>
+
     <AppFooter />
   </div>
 </template>
@@ -95,6 +124,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import AppFooter from '../components/AppFooter.vue'
+import { logout, redeemAdminInvite } from '../api/index.js'
 
 useHead({
   title: 'ZZX AI Agent - 智能体工作台',
@@ -103,6 +133,11 @@ useHead({
 
 const router = useRouter()
 const user = ref(null)
+const inviteOpen = ref(false)
+const inviteCode = ref('')
+const inviteError = ref('')
+const inviteSuccess = ref('')
+const inviteLoading = ref(false)
 
 onMounted(() => {
   const raw = localStorage.getItem('user')
@@ -113,10 +148,40 @@ onMounted(() => {
 
 const navigateTo = (path) => router.push(path)
 
-function handleLogout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
-  router.push('/login')
+function openInviteDialog() {
+  inviteCode.value = ''
+  inviteError.value = ''
+  inviteSuccess.value = ''
+  inviteOpen.value = true
+}
+
+function closeInviteDialog() {
+  if (!inviteLoading.value) inviteOpen.value = false
+}
+
+async function handleRedeemInvite() {
+  inviteError.value = ''
+  inviteSuccess.value = ''
+  inviteLoading.value = true
+  try {
+    const res = await redeemAdminInvite(inviteCode.value.trim())
+    user.value = { ...user.value, role: res.data?.role || 'admin' }
+    localStorage.setItem('user', JSON.stringify(user.value))
+    inviteCode.value = ''
+    inviteSuccess.value = res.msg || '管理员权限已激活'
+  } catch (error) {
+    inviteError.value = error.response?.data?.msg || '邀请码验证失败，请稍后重试'
+  } finally {
+    inviteLoading.value = false
+  }
+}
+
+async function handleLogout() {
+  try {
+    await logout()
+  } finally {
+    router.push('/login')
+  }
 }
 </script>
 
@@ -152,6 +217,10 @@ function handleLogout() {
 .nav-right { gap: 18px; }
 .online-pill { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .online-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); }
+.invite-button, .admin-pill { height: 32px; display: inline-flex; align-items: center; border-radius: 9px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+.invite-button { padding: 0 12px; color: #c4b5fd; background: rgba(139,92,246,.08); border: 1px solid rgba(167,139,250,.25); transition: .2s; }
+.invite-button:hover { color: #fff; background: rgba(139,92,246,.18); border-color: rgba(167,139,250,.5); }
+.admin-pill { padding: 0 10px; color: #07101b; background: linear-gradient(90deg, #67e8f9, #a78bfa); }
 .user-chip { gap: 10px; padding-left: 18px; border-left: 1px solid var(--line); }
 .user-avatar { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid rgba(103,232,249,.3); border-radius: 11px; color: var(--primary); background: rgba(103,232,249,.08); font-weight: 700; }
 .user-copy { display: flex; flex-direction: column; gap: 2px; }
@@ -200,6 +269,23 @@ main { position: relative; z-index: 2; max-width: 1184px; margin: 0 auto; paddin
 .value-strip div:first-child { padding-left: 0; }.value-strip div:last-child { border: 0; }
 .value-strip strong { font-size: 13px; }.value-strip span { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
+.dialog-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(2,6,16,.76); backdrop-filter: blur(12px); }
+.invite-dialog { position: relative; width: min(440px, 100%); padding: 34px; background: linear-gradient(145deg, rgba(18,28,49,.98), rgba(8,13,26,.99)); border: 1px solid rgba(167,139,250,.25); border-radius: 22px; box-shadow: 0 30px 100px rgba(0,0,0,.58), 0 0 70px rgba(139,92,246,.08); }
+.dialog-close { position: absolute; top: 16px; right: 16px; width: 32px; height: 32px; color: var(--muted); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 9px; font-size: 21px; line-height: 1; }
+.dialog-close:hover { color: var(--text); border-color: var(--line-strong); }
+.dialog-kicker { color: #a78bfa; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.invite-dialog h2 { margin-top: 12px; font: 800 25px/1.25 'Manrope', sans-serif; }
+.invite-dialog > p { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.invite-dialog form { margin-top: 25px; }
+.invite-dialog label { display: block; margin-bottom: 9px; color: #bdc7d8; font-size: 12px; font-weight: 700; }
+.invite-dialog input { width: 100%; height: 48px; padding: 0 14px; color: var(--text); background: rgba(4,9,20,.72); border: 1px solid var(--line-strong); border-radius: 11px; outline: none; transition: .2s; }
+.invite-dialog input:focus { border-color: rgba(167,139,250,.75); box-shadow: 0 0 0 3px rgba(139,92,246,.1); }
+.dialog-message { margin-top: 10px; font-size: 12px; }
+.dialog-message.error { color: #fb7185; }.dialog-message.success { color: var(--success); }
+.redeem-button { width: 100%; height: 48px; margin-top: 18px; color: #07101b; background: linear-gradient(90deg, #67e8f9, #a78bfa); border: 0; border-radius: 11px; font-weight: 800; transition: .2s; }
+.redeem-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(103,232,249,.15); }
+.redeem-button:disabled { cursor: not-allowed; opacity: .45; }
+
 @media (max-width: 800px) {
   .nav { height: 72px; padding: 0 20px; }
   .online-pill, .user-copy { display: none; }
@@ -216,6 +302,8 @@ main { position: relative; z-index: 2; max-width: 1184px; margin: 0 auto; paddin
 @media (max-width: 480px) {
   .brand-mark > span:last-child { display: none; }
   .user-chip { padding-left: 0; border: 0; }
+  .nav-right { gap: 8px; }
+  .invite-button { padding: 0 9px; letter-spacing: 0; }
   .hero-meta { gap: 14px; }
   .agent-card { min-height: auto; padding: 22px; }
   .agent-visual { height: 155px; }

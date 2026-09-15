@@ -153,7 +153,7 @@ def extract_thought(log_text: str) -> str:
     return log_text.strip()  # 保底
 
 
-def stream_agent(executor, message, session_id="", llm_ref=None):
+def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
     """
     Synchronous agent streaming with real-time thinking log.
 
@@ -212,8 +212,8 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
     if session_id and final_answer:
         try:
             from app.chat_history import save_message, update_summary
-            save_message(session_id, "assistant", final_answer)
+            save_message(user_id, session_id, "assistant", final_answer)
             if llm_ref:
-                update_summary(session_id)
+                update_summary(user_id, session_id)
         except Exception:
             logger.exception("Agent result persistence failed session=%s", session_id)

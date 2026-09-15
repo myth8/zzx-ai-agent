@@ -44,7 +44,9 @@ def make_chain(system_prompt, context=""):
     return prompt | llm | StrOutputParser()
 
 
-def stream_chain(chain, message, context="", session_id="", llm_ref=None):
+def stream_chain(
+    chain, message, context="", user_id=None, session_id="", llm_ref=None
+):
     """
     同步流式输出，实时记录每个 token 块。
 
@@ -85,8 +87,8 @@ def stream_chain(chain, message, context="", session_id="", llm_ref=None):
     if session_id:
         try:
             from app.chat_history import save_message, update_summary
-            save_message(session_id, "assistant", final_answer)
+            save_message(user_id, session_id, "assistant", final_answer)
             if llm_ref:
-                update_summary(session_id)
+                update_summary(user_id, session_id)
         except Exception:
             logger.exception("Chain result persistence failed session=%s", session_id)

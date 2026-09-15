@@ -21,6 +21,9 @@ def create_app(config_object=None, initialize_database=True):
     app = Flask(__name__)
     app.config.from_object(selected_config)
 
+    from app.extensions import init_extensions
+    init_extensions(app)
+
     # Initialise database tables on startup
     if initialize_database:
         with app.app_context():
@@ -29,12 +32,22 @@ def create_app(config_object=None, initialize_database=True):
             init_db()
             init_chat_tables()
 
-    # Minimal CORS via after_request
+    # Credential-aware CORS for the configured frontend origins.
     @app.after_request
     def add_cors(response):
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        from flask import request
+
+        origin = request.headers.get("Origin")
+        if origin and origin in app.config["CORS_ORIGINS"]:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers.add("Vary", "Origin")
+        response.headers["Access-Control-Allow-Methods"] = (
+            "GET, POST, PUT, DELETE, OPTIONS"
+        )
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Authorization, Content-Type, X-CSRF-TOKEN"
+        )
         return response
 
     # Register route blueprints
@@ -50,10 +63,13 @@ def create_app(config_object=None, initialize_database=True):
     # Health check
     @app.route("/api/health")
     def health():
+        from app.auth_store import redis_is_ready
+        redis_ready = redis_is_ready()
         return jsonify({
-            "status": "ok",
+            "status": "ok" if redis_ready else "degraded",
             "mode": app.config["SYSTEM_NAME"],
             "environment": app.config["APP_ENV"],
+            "redis": "ok" if redis_ready else "unavailable",
         })
 
     return app
