@@ -32,6 +32,13 @@ def _env_int(name, default):
         raise RuntimeError(f"{name} must be an integer") from exc
 
 
+def _env_path(name, default):
+    value = Path(_env(name, str(default))).expanduser()
+    if not value.is_absolute():
+        value = _BACKEND_DIR / value
+    return str(value.resolve())
+
+
 def _environment():
     value = _env("APP_ENV", "development").lower()
     aliases = {"dev": "development", "prod": "production", "testing": "test"}
@@ -98,6 +105,12 @@ class BaseConfig:
     REDIS_CONNECT_TIMEOUT = _env_int("REDIS_CONNECT_TIMEOUT", 2)
     REDIS_SOCKET_TIMEOUT = _env_int("REDIS_SOCKET_TIMEOUT", 2)
 
+    # RAG document and vector index storage
+    RAG_DOCUMENTS_DIR = _env_path("RAG_DOCUMENTS_DIR", "documents")
+    RAG_CHROMA_DIR = _env_path("RAG_CHROMA_DIR", "chroma_db")
+    RAG_MAX_FILE_SIZE_BYTES = _env_int("RAG_MAX_FILE_SIZE_MB", 5) * 1024 * 1024
+    MAX_CONTENT_LENGTH = _env_int("MAX_REQUEST_SIZE_MB", 8) * 1024 * 1024
+
     # Browser origins allowed to send credentialed requests.
     CORS_ORIGINS = tuple(
         origin.strip()
@@ -123,6 +136,13 @@ class BaseConfig:
         if missing:
             raise RuntimeError(
                 "Missing required environment variables: " + ", ".join(missing)
+            )
+
+        if cls.RAG_MAX_FILE_SIZE_BYTES <= 0:
+            raise RuntimeError("RAG_MAX_FILE_SIZE_MB must be greater than zero")
+        if cls.MAX_CONTENT_LENGTH < cls.RAG_MAX_FILE_SIZE_BYTES:
+            raise RuntimeError(
+                "MAX_REQUEST_SIZE_MB must not be smaller than RAG_MAX_FILE_SIZE_MB"
             )
 
         if cls.APP_ENV == "production":

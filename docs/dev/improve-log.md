@@ -267,3 +267,66 @@ WHERE username = '需要设为管理员的账号';
 - 批量检查注册、登录、刷新、邀请码兑换、退出、用户信息、会话增删改查以及两个 SSE 接口，15 个路径的预检均可达。
 - 对注册、登录、邀请码、会话和 SSE 发起无敏感数据请求，分别得到预期的 400 参数错误或 401 未登录响应，证明请求已到达后端而非被跨域层拦截。
 - 前端生产构建与后端安全回归测试继续通过。
+
+## 2026-09-15：RAG 知识库管理 MVP
+
+### 本次目标
+
+为现有 RAG 检索链路增加管理员可操作的文档管理闭环，使 documents 目录中的 Markdown 知识源可以在前端查看、上传和删除，并在内容变化后安全刷新 Chroma 与 BM25 索引。
+
+### 后端实现
+
+- 新增 rag_documents 表，保存文件名、展示名、文件大小、SHA-256、切片数量、索引状态、错误摘要、上传人和时间信息。
+- 应用启动时自动创建表，并将 documents 目录中已有的 Markdown 文件同步到数据库台账；修复元数据切分后，当前 3 份文档同步为 15 个有效正文切片。
+- 新增 /api/admin/rag 管理蓝图，提供文档列表、全文、切片详情、上传、删除和手动重建接口。
+- 全部接口使用 admin_required；普通用户即使绕过前端直接调用，也会收到统一 403 响应。
+- 文件上传仅接受安全文件名的 .md 文件，要求 UTF-8、非空、不能与现有文件同名，并受 RAG_MAX_FILE_SIZE_MB 与 MAX_REQUEST_SIZE_MB 限制。
+- 删除前先将源文件原子移动到临时名称；索引刷新失败时恢复原文件，避免文件已经删除但检索索引未更新。
+- 文档切片增加 source 和 chunk_index 元数据，前端展示的切片与实际进入检索器的切片使用同一套逻辑。
+
+### 索引刷新设计
+
+- 每次刷新先构建新的 Chroma collection 和 BM25 检索器，全部成功后再原子替换进程内查询状态。
+- 持久化索引清单，记录当前 collection、文档内容签名和切片数；应用重启时若文档未变化，则直接复用已有 Chroma collection，避免重复计算全部向量。
+- 构建过程中已有查询继续使用旧索引；切换完成且旧查询结束后，再清理旧 collection。
+- 上传或删除失败会回滚文件与数据库操作，并尽力恢复与磁盘内容一致的索引状态。
+- 修复旧实现重复使用固定 collection、重复初始化可能持续追加相同文档的问题。
+- 当前仍是全量重建和单进程状态切换；增量索引、跨 Worker active_version、分布式锁与后台任务属于阶段 4.1 后续增强。
+
+### 文档与切片元数据完善
+
+- 修复 YAML Front Matter 虽已解析、却仍进入正文切分的问题；Front Matter 现在只作为结构化元数据，正文从第一个 Markdown 标题开始切片，不再生成无意义的“元数据切片”。
+- rag_documents 使用 document_metadata 保存文档级元数据；新增 rag_document_chunks 子表，逐条保存切片正文、章节、内容哈希、完整 metadata 和 vector_id，并通过 document_id 外键关联文档。
+- 切片详情接口改为直接查询 rag_document_chunks，不再在每次请求时读取文件并临时重新切片；删除文档时通过 ON DELETE CASCADE 自动清理子表记录。
+- chunk_id 同时作为 Chroma 的向量记录 ID 和 MySQL 的唯一业务 ID，使关系库切片与向量记录可以一一对应。索引清单增加结构版本，切片 ID 规则变化时会强制重建旧 collection。
+- 删除早期 MVP 中的 rag_documents.chunk_metadata JSON 字段，避免与 rag_document_chunks 重复维护；升级环境会在启动初始化时自动移除旧字段，全新环境不会创建该字段。
+- 切片元数据统一增加 source、document_title、section_title、chunk_index、chunk_id、char_count 和 content_sha256，并继承可用于检索过滤的文档级业务元数据。
+- 内置文档补充 description、relationship_stage、topics、audience、language、version、source_type 和 schema_version 等字段。
+- 管理页面将文档元数据、正文和切片详情分区展示；文档级字段不再在每张切片卡片上重复堆叠。
+- 应用启动会自动创建切片表、迁移现有文档的全部切片，同时重新同步磁盘文件、文档元数据和切片记录。
+
+### 前端实现
+
+- 首页为管理员增加 SYSTEM / 003“RAG 知识库”入口；普通用户不渲染该入口。
+- 新增知识库管理页面，展示文档数、切片数、索引状态和文档目录。
+- 支持 Markdown 全文渲染、切片内容、字符数与标题元数据查看。
+- 支持上传 Markdown、删除确认、操作反馈、索引刷新状态和手动重建。
+- “重建索引”升级为“检查并重建”：联合校验源文件内容签名、索引结构版本、Chroma collection、向量 ID 集合和 MySQL 切片 ID 集合；索引最新时直接提示无需重建，仅在状态过期或不一致时触发实际重建。
+- 新增管理员索引状态接口，页面可展示 CHECKING、READY、STALE 和 UNKNOWN，并显示需要重建的具体原因。
+- 上传区新增“格式示例”说明窗口，展示 Front Matter、标题层级与 UTF-8 要求，并提供可直接下载修改的 示例.md。
+- 上传过程增加分阶段进度面板：文件校验、真实上传进度、后端切片与向量构建、页面刷新和完成状态；无法获得精确百分比的索引阶段使用动态状态和实际耗时展示。
+- 前端路由增加管理员可见性守卫；最终权限仍以后端 admin_required 为准。
+
+### 配置与依赖
+
+- 新增 RAG_DOCUMENTS_DIR、RAG_CHROMA_DIR、RAG_MAX_FILE_SIZE_MB 和 MAX_REQUEST_SIZE_MB。
+- 补充 sentence-transformers==6.0.1；原项目虽然使用 HuggingFaceEmbeddings 和 CrossEncoder，但依赖文件此前没有声明该运行依赖。
+
+### 验证结果
+
+- 前端生产构建通过。
+- 后端 14 项测试通过，覆盖原有 JWT/Redis 回归、管理员拒绝、Markdown 文件校验、上传触发重建、切片元数据、切片表读取、最新索引跳过及过期索引重建。
+- 使用当前 MySQL 初始化并同步 rag_documents 表成功；修复 Front Matter 切分后，dating.md、married.md、single.md 各生成 5 个有效正文切片，共 15 个切片。
+- 使用 BAAI/bge-small-zh-v1.5 实际完成 Chroma 与 BM25 索引构建；文档内容变化后会依据内容签名触发重建。
+- 使用临时管理员登录会话实际调用文档列表、全文和切片接口，均返回 200；测试会话随后已吊销。
+- 完整功能验收时，当前 5 份文档对应 MySQL 25 条切片和 Chroma 25 条向量，三侧 ID 集合一致；索引状态返回 UP_TO_DATE。

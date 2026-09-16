@@ -152,6 +152,41 @@ export const getSessionMessages = (sessionId) => {
   return request.get('/session/' + sessionId + '/messages').then(r => r.data)
 }
 
+// --- RAG administration API ------------------------------------
+
+export const listRagDocuments = () => {
+  return request.get('/admin/rag/documents').then(r => r.data)
+}
+
+export const getRagDocument = (documentId) => {
+  return request.get('/admin/rag/documents/' + documentId).then(r => r.data)
+}
+
+export const getRagDocumentChunks = (documentId) => {
+  return request.get('/admin/rag/documents/' + documentId + '/chunks').then(r => r.data)
+}
+
+export const getRagIndexStatus = () => {
+  return request.get('/admin/rag/index-status').then(r => r.data)
+}
+
+export const uploadRagDocument = (file, onUploadProgress) => {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post('/admin/rag/documents', form, {
+    timeout: 300000,
+    onUploadProgress
+  }).then(r => r.data)
+}
+
+export const deleteRagDocument = (documentId) => {
+  return request.delete('/admin/rag/documents/' + documentId, { timeout: 300000 }).then(r => r.data)
+}
+
+export const rebuildRagIndex = () => {
+  return request.post('/admin/rag/rebuild', {}, { timeout: 300000 }).then(r => r.data)
+}
+
 // --- SSE helper --------------------------------------------------
 
 export const connectSSE = (url, params, onMessage, onError) => {

@@ -11,6 +11,8 @@ pymysql==1.2.0
 PyJWT==2.13.0
 redis==8.1.0
 langchain-huggingface==0.3.1
+sentence-transformers==6.0.1
+PyYAML==6.0.3
 
 # ── RAG ──
 chromadb==1.5.9

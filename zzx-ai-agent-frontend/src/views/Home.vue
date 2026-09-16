@@ -26,9 +26,9 @@
 
     <main>
       <section class="hero">
-        <div class="hero-kicker"><span>02</span> 个专属智能体已就绪</div>
-        <h1>今天，想和哪个<br><span>智能体</span>一起思考？</h1>
-        <p>从细腻的情感建议到复杂任务的自主规划，让合适的智能体接住你的每一个问题。</p>
+        <div class="hero-kicker"><span>{{ user?.role === 'admin' ? '03' : '02' }}</span> 个专属空间已就绪</div>
+        <h1>今天，想进入哪个<br><span>智能空间</span>？</h1>
+        <p>从细腻的情感建议、复杂任务规划到知识库管理，让每一种能力都有清晰入口。</p>
         <div class="hero-meta">
           <span><i class="dot green"></i>系统正常</span>
           <span><i class="dot cyan"></i>MCP 已连接</span>
@@ -36,7 +36,7 @@
         </div>
       </section>
 
-      <section class="agent-grid" aria-label="选择智能体">
+      <section class="agent-grid" aria-label="选择智能空间">
         <article class="agent-card love-card" tabindex="0" @click="navigateTo('/love-master')" @keyup.enter="navigateTo('/love-master')">
           <div class="card-topline">
             <span class="agent-state"><i></i>AVAILABLE</span>
@@ -78,6 +78,28 @@
           <div class="skill-row"><span>深度推理</span><span>任务规划</span><span>工具调用</span></div>
           <button class="enter-button" aria-label="进入 AI 超级智能体">
             <span>开启任务</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </article>
+
+        <article v-if="user?.role === 'admin'" class="agent-card rag-card" tabindex="0" @click="navigateTo('/rag-admin')" @keyup.enter="navigateTo('/rag-admin')">
+          <div class="card-topline">
+            <span class="agent-state"><i></i>ADMIN ONLY</span>
+            <span class="agent-index">SYSTEM / 03</span>
+          </div>
+          <div class="agent-visual rag-visual">
+            <svg viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <ellipse cx="60" cy="35" rx="30" ry="12" stroke="currentColor" stroke-width="3"/>
+              <path d="M30 35v22c0 6.6 13.4 12 30 12s30-5.4 30-12V35M30 57v22c0 6.6 13.4 12 30 12s30-5.4 30-12V57" stroke="currentColor" stroke-width="3"/>
+              <path d="M48 50h24M48 72h24" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".55"/>
+            </svg>
+          </div>
+          <div class="agent-tag">KNOWLEDGE OPERATIONS</div>
+          <h2>RAG 知识库</h2>
+          <p>管理 Markdown 知识文档，查看切片结果，并在内容变更后安全刷新检索索引。</p>
+          <div class="skill-row"><span>文档管理</span><span>切片预览</span><span>索引刷新</span></div>
+          <button class="enter-button" aria-label="进入 RAG 知识库管理">
+            <span>管理知识库</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
         </article>
@@ -242,12 +264,12 @@ main { position: relative; z-index: 2; max-width: 1184px; margin: 0 auto; paddin
 .dot { width: 5px; height: 5px; border-radius: 50%; }
 .green { background: var(--success); }.cyan { background: var(--primary); }.violet { background: var(--violet); }
 
-.agent-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 22px; }
 .agent-card { --accent: var(--primary); position: relative; min-height: 560px; padding: 28px; overflow: hidden; background: linear-gradient(145deg, rgba(18,28,49,.88), rgba(10,16,31,.94)); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); cursor: pointer; transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease; }
 .agent-card::before { content: ''; position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 47%); transition: opacity .3s; }
 .agent-card:hover, .agent-card:focus-visible { transform: translateY(-8px); border-color: color-mix(in srgb, var(--accent) 38%, transparent); box-shadow: 0 32px 90px rgba(0,0,0,.46); outline: none; }
 .agent-card:hover::before, .agent-card:focus-visible::before { opacity: 1; }
-.love-card { --accent: var(--love); }.super-card { --accent: var(--primary); }
+.love-card { --accent: var(--love); }.super-card { --accent: var(--primary); }.rag-card { --accent: var(--success); }
 .card-topline { position: relative; z-index: 1; display: flex; justify-content: space-between; color: #65728a; font: 700 10px/1 'Manrope', sans-serif; letter-spacing: .13em; }
 .agent-state { display: flex; align-items: center; gap: 7px; color: color-mix(in srgb, var(--accent) 75%, white); }
 .agent-state i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 9px var(--accent); }

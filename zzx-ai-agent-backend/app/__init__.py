@@ -29,8 +29,10 @@ def create_app(config_object=None, initialize_database=True):
         with app.app_context():
             from app.auth import init_db
             from app.chat_history import init_tables as init_chat_tables
+            from app.rag_documents import init_rag_tables
             init_db()
             init_chat_tables()
+            init_rag_tables()
 
     # Credential-aware CORS for the configured frontend origins.
     @app.after_request
@@ -55,10 +57,12 @@ def create_app(config_object=None, initialize_database=True):
     from app.routes.love_app import love_bp
     from app.auth import auth_bp
     from app.routes.session import session_bp
+    from app.routes.rag_admin import rag_admin_bp
     app.register_blueprint(manus_bp)
     app.register_blueprint(love_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(session_bp)
+    app.register_blueprint(rag_admin_bp)
 
     # Health check
     @app.route("/api/health")
@@ -71,5 +75,13 @@ def create_app(config_object=None, initialize_database=True):
             "environment": app.config["APP_ENV"],
             "redis": "ok" if redis_ready else "unavailable",
         })
+
+    @app.errorhandler(413)
+    def request_too_large(_error):
+        return jsonify({
+            "code": 413,
+            "msg": "请求内容超过允许的大小",
+            "error_code": "REQUEST_TOO_LARGE",
+        }), 413
 
     return app

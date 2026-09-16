@@ -1,7 +1,21 @@
 ---
+schema_version: 1
 title: 恋爱常见问题 - 恋爱篇
+description: 面向恋爱阶段用户的沟通、冲突处理、信任建设与关系维护指南。
 status: 恋爱中
+relationship_stage: dating
 category: 情感解惑
+topics:
+  - 沟通技巧
+  - 冲突处理
+  - 信任建设
+  - 关系维护
+audience:
+  - 恋爱中的伴侣
+  - 希望改善亲密关系的人群
+language: zh-CN
+version: "1.0"
+source_type: curated
 ---
 
 # 恋爱篇：从“我喜欢你”到“我们好好相处”

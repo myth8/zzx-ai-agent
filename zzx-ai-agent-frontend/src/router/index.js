@@ -40,6 +40,15 @@ const routes = [
     meta: { title: 'AI超级智能体 - ZZX-AI超级智能体' }
   },
   {
+    path: '/rag-admin',
+    name: 'RagAdmin',
+    component: () => import('../views/RagAdmin.vue'),
+    meta: {
+      title: 'RAG 知识库管理 - ZZX-AI超级智能体',
+      requiresAdmin: true
+    }
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('../views/Home.vue'),
@@ -63,6 +72,14 @@ router.beforeEach((to, from, next) => {
   if (!publicRoutes.includes(to.name)) {
     if (!token) {
       return next({ name: 'Login', query: { redirect: to.fullPath } })
+    }
+    if (to.meta.requiresAdmin) {
+      try {
+        const user = JSON.parse(localStorage.getItem('user') || '{}')
+        if (user.role !== 'admin') return next({ name: 'Home' })
+      } catch {
+        return next({ name: 'Home' })
+      }
     }
   } else {
     if (token) {

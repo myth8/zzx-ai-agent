@@ -2,10 +2,11 @@
 
 ## 项目背景
 
-ZZX-AI 超级智能体是一个基于大语言模型的 AI 对话平台，旨在提供两种不同类型的 AI 对话服务：
+ZZX-AI 超级智能体是一个基于大语言模型的 AI 对话平台，当前提供两类 AI 对话能力和一个管理员知识库空间：
 
 - **AI 恋爱大师**（AI Love Master）：面向情感咨询场景的温暖型对话助手，通过链式调用（Chain）模式提供温柔、共情的恋爱建议。
 - **AI 超级智能体**（AI Super Agent）：面向通用问答场景的全能型 AI 助手，基于 ReAct Agent 模式，具备工具调用、知识检索、技能模板等能力，可以解决各类专业问题。
+- **RAG 知识库管理**：仅管理员可见，支持 Markdown 文档、全文、切片、上传、删除和索引重建。
 
 项目采用前后端分离架构，后端以 Flask 提供 RESTful API 和 SSE 流式接口，前端以 Vue 3 构建单页应用，覆盖了从用户注册登录、会话管理、流式对话到持久化记忆的完整链路。
 
@@ -16,7 +17,7 @@ ZZX-AI 超级智能体是一个基于大语言模型的 AI 对话平台，旨在
 | **后端框架** | Flask 3.x | Web 服务框架，路由分发、蓝图注册 |
 | **AI 框架** | LangChain 0.3.x | LLM 调用、Agent/Chain 构建、Prompt 管理 |
 | **LLM 模型** | DeepSeek Chat (deepseek-chat) | 底层大语言模型 |
-| **数据库** | MySQL + PyMySQL | 用户信息、会话记录、消息存储 |
+| **数据库** | MySQL + PyMySQL | 用户权限、会话消息和 RAG 文档台账 |
 | **向量数据库** | ChromaDB + BGE embedding | RAG 知识库语义检索 |
 | **关键词检索** | BM25 (rank_bm25) | RAG 多路召回的关键词分支 |
 | **重排序** | BGE Reranker (Cross-Encoder) | RAG 多路召回后的结果排序 |
@@ -24,8 +25,8 @@ ZZX-AI 超级智能体是一个基于大语言模型的 AI 对话平台，旨在
 | **前端框架** | Vue 3 + Vue Router | 单页应用框架 |
 | **前端构建** | Vite | 前端开发服务器与打包 |
 | **HTTP 客户端** | Axios | 前端 API 请求 |
-| **SSE 通信** | EventSource (原生) | 服务端事件流，实现流式对话 |
-| **身份认证** | JWT (PyJWT) | 用户 Token 鉴权 |
+| **SSE 通信** | Fetch + ReadableStream | 携带 Bearer Token 的流式对话 |
+| **身份认证** | Flask-JWT-Extended + Redis | JWT 续签、登录状态和吊销 |
 | **密码加密** | Werkzeug | 密码哈希存储 |
 
 ## 编程软件
@@ -119,6 +120,14 @@ RAG 引擎基于 **多路召回 + 加权融合 + 重排序** 的经典架构，�
 - **Cross-Encoder**：`BAAI/bge-reranker-base` 对融合结果进行精确相关性排序
 
 RAG 工具暴露为 LangChain 的 `@tool`，可直接被 Agent 调用。
+
+管理员可以通过 `/rag-admin` 管理 `documents` 目录中的 Markdown 知识源。YAML Front Matter 作为文档元数据独立解析，不参与正文向量化；每个正文切片拥有稳定 ID、章节标题和内容指纹。后端使用 `rag_documents` 保存文档台账，使用 `rag_document_chunks` 逐条保存切片正文与元数据；`chunk_id` 同时作为 Chroma `vector_id`，保证两侧一一对应。上传、删除成功后会刷新 Chroma 与 BM25。新向量 collection 构建完成后才切换查询状态，失败时回滚文件操作并保留旧索引；文档内容未变化时，应用重启会通过索引清单复用已有向量 collection。
+
+管理页面提供 Markdown 格式说明和可下载的 `示例.md`。上传时会依次展示文件校验、上传、切片与向量构建、页面刷新状态；索引构建阶段显示动态进度和已用时间。
+
+“检查并重建”会先核对源文件签名、索引结构版本、Chroma collection、向量 ID 和 MySQL 切片 ID；全部一致时跳过重建，只有索引过期或数据不一致时才重新生成向量。
+
+RAG 管理接口全部使用 `admin_required`。前端隐藏入口只负责使用体验，不能替代后端授权。
 
 实现文件：`app/llm/rag.py`
 
@@ -221,6 +230,7 @@ zzx-ai-agent/
 │   │   ├── config.py              # 全局配置（API Key、数据库、JWT）
 │   │   ├── auth.py                # JWT 认证（注册/登录/鉴权）
 │   │   ├── chat_history.py        # 会话管理、消息持久化、摘要生成
+│   │   ├── rag_documents.py       # RAG 文档台账和文件安全处理
 │   │   ├── llm/
 │   │   │   ├── __init__.py        # 共享 LLM 实例（ChatOpenAI）
 │   │   │   ├── agent.py           # ReAct Agent 实现（工具调用 + 流式输出）
@@ -231,7 +241,8 @@ zzx-ai-agent/
 │   │   ├── routes/
 │   │   │   ├── manus.py           # AI 超级智能体路由
 │   │   │   ├── love_app.py        # AI 恋爱大师路由
-│   │   │   └── session.py         # 会话 CRUD API
+│   │   │   ├── session.py         # 会话 CRUD API
+│   │   │   └── rag_admin.py       # 管理员 RAG 文档 API
 │   │   └── utils/
 │   │       └── sse.py             # SSE 流式响应工具
 │   ├── documents/                 # RAG 知识库文档（Markdown）
@@ -250,7 +261,8 @@ zzx-ai-agent/
 │   │   │   ├── Register.vue       # 注册页
 │   │   │   ├── SessionList.vue    # 会话列表
 │   │   │   ├── LoveMaster.vue     # AI 恋爱大师对话页
-│   │   │   └── SuperAgent.vue     # AI 超级智能体对话页
+│   │   │   ├── SuperAgent.vue     # AI 超级智能体对话页
+│   │   │   └── RagAdmin.vue       # RAG 知识库管理页
 │   │   └── components/
 │   │       ├── ChatRoom.vue       # 聊天室组件
 │   │       ├── MarkdownRenderer.vue # Markdown 渲染器
