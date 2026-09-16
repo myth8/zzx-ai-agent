@@ -6,7 +6,7 @@ import unittest
 import uuid
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from flask import Flask
 from redis.exceptions import RedisError
@@ -48,6 +48,91 @@ class RagFilenameTest(unittest.TestCase):
         self.assertEqual(chunks[0].metadata["section_title"], "问题")
         self.assertEqual(len(chunks[0].metadata["chunk_id"]), 24)
         self.assertEqual(len(chunks[0].metadata["content_sha256"]), 64)
+
+    def test_metadata_prefilter_matches_title_and_topics_conservatively(self):
+        from app.llm.rag import (
+            select_metadata_filtered_documents,
+            split_markdown_text,
+        )
+
+        long_distance = split_markdown_text(
+            "---\ntitle: 恋爱常见问题 - 异地恋篇\ntopics:\n  - 信任建设\n---\n\n"
+            "# 异地恋\n\n## 沟通\n\n异地恋内容。",
+            "long-distance.md",
+        )
+        married = split_markdown_text(
+            "---\ntitle: 恋爱常见问题 - 已婚篇\ntopics:\n  - 家庭协作\n---\n\n"
+            "# 已婚\n\n## 沟通\n\n婚姻内容。",
+            "married.md",
+        )
+        docs = long_distance + married
+
+        title_docs, title_matches = select_metadata_filtered_documents(
+            "异地恋应该怎样保持联系？",
+            docs,
+        )
+        self.assertEqual(
+            {doc.metadata["source"] for doc in title_docs},
+            {"long-distance.md"},
+        )
+        self.assertIn("title", title_matches["long-distance.md"])
+
+        topic_docs, topic_matches = select_metadata_filtered_documents(
+            "家庭协作总是做不好怎么办？",
+            docs,
+        )
+        self.assertEqual(
+            {doc.metadata["source"] for doc in topic_docs},
+            {"married.md"},
+        )
+        self.assertIn("topics", topic_matches["married.md"])
+
+        unfiltered_docs, unfiltered_matches = select_metadata_filtered_documents(
+            "最近心情不太好，想听听建议。",
+            docs,
+        )
+        self.assertEqual(unfiltered_docs, [])
+        self.assertEqual(unfiltered_matches, {})
+
+    def test_metadata_prefilter_is_applied_to_both_recall_paths(self):
+        from app.llm.rag import RAGEngine, split_markdown_text
+
+        matched_docs = split_markdown_text(
+            "---\ntitle: 恋爱常见问题 - 异地恋篇\ntopics:\n  - 异地沟通\n---\n\n"
+            "# 异地恋\n\n## 沟通\n\n只属于异地恋的内容。",
+            "long-distance.md",
+        )
+        other_docs = split_markdown_text(
+            "---\ntitle: 恋爱常见问题 - 已婚篇\ntopics:\n  - 家庭协作\n---\n\n"
+            "# 已婚\n\n## 家庭\n\n不应进入结果的内容。",
+            "married.md",
+        )
+        vector_store = MagicMock()
+        vector_store.similarity_search.return_value = matched_docs
+        full_vector_retriever = MagicMock()
+        full_bm25_retriever = MagicMock()
+        engine = RAGEngine.__new__(RAGEngine)
+        engine._reranker = None
+
+        with patch.object(engine, "_get_reranker", return_value=None):
+            result = engine._query_with_state(
+                "异地恋中的异地沟通怎么安排？",
+                3,
+                tuple(matched_docs + other_docs),
+                vector_store,
+                full_vector_retriever,
+                full_bm25_retriever,
+            )
+
+        vector_store.similarity_search.assert_called_once_with(
+            "异地恋中的异地沟通怎么安排？",
+            k=1,
+            filter={"source": "long-distance.md"},
+        )
+        full_vector_retriever.invoke.assert_not_called()
+        full_bm25_retriever.invoke.assert_not_called()
+        self.assertIn("只属于异地恋的内容", result)
+        self.assertNotIn("不应进入结果的内容", result)
 
 
 class RagAdminRouteTest(unittest.TestCase):

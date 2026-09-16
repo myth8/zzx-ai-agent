@@ -58,45 +58,43 @@ ZZX AI Agent 是一个前后端分离的智能体项目，目前提供两个 AI 
 面向管理员的知识运营入口，强调：
 
 - 管理 Markdown 知识文档和结构化元数据。
-- 查看实际切片以及 MySQL 与 Chroma 的映射关系。
+- 查看实际切片、全部切片元信息以及 MySQL 与 Chroma 的映射关系。
 - 上传或删除文档后安全刷新检索索引。
 - 检查索引一致性，避免无意义的重复重建。
+- 使用标题和主题元数据辅助 Chroma 与 BM25 一致过滤召回范围。
 
 从产品视角看，它不是两个完全独立的聊天页面，而是同一个 Agent 平台上的两种能力形态：
 
-```mermaid
-flowchart TD
-    USER["用户"] --> PLATFORM["ZZX AI Agent 平台"]
-    PLATFORM --> LOVE["AI 恋爱大师垂直场景"]
-    PLATFORM --> SUPER["AI 超级智能体通用场景"]
-    PLATFORM --> RAGADMIN["RAG 知识库管理"]
-    LOVE --> MEMORY["对话记忆"]
-    SUPER --> MEMORY
-    SUPER --> RAG["RAG 知识检索"]
-    RAGADMIN --> RAG
-    SUPER --> MCP["MCP 工具生态"]
+```text
+用户
+ │
+ ▼
+ZZX AI Agent 平台
+ ├─→ AI 恋爱大师垂直场景 ──→ 对话记忆
+ ├─→ AI 超级智能体通用场景
+ │       ├─→ 对话记忆
+ │       ├─→ RAG 知识检索
+ │       └─→ MCP 工具生态
+ └─→ RAG 知识库管理 ──────→ RAG 知识检索
 ```
 
 ## 二、当前技术架构
 
 项目当前主要由四部分组成：
 
-```mermaid
-flowchart TD
-    PAGE["Vue 前端页面"] --> API["Axios 与 SSE 请求"]
-    API --> AUTH["JWT 与权限"]
-    API --> SESSION["会话与消息"]
-    API --> CHAIN["Love Master Chain"]
-    API --> AGENT["Super Agent"]
-    AUTH --> MYSQL["MySQL"]
-    AUTH --> REDIS["Redis"]
-    SESSION --> MYSQL
-    CHAIN --> MODEL["大模型服务"]
-    AGENT --> MODEL
-    AGENT --> RETRIEVAL["RAG 检索"]
-    RETRIEVAL --> VECTOR["Chroma 与 BM25"]
-    AGENT --> TOOLS["MCP 与本地工具"]
-    TOOLS --> MCP_SERVER["MCP Server"]
+```text
+Vue 前端页面
+      │
+      ▼
+Axios 与 SSE 请求
+  ├─→ JWT 与权限 ──────────┬─→ MySQL
+  │                         └─→ Redis
+  ├─→ 会话与消息 ─────────────→ MySQL
+  ├─→ Love Master Chain ──────→ 大模型服务
+  └─→ Super Agent
+          ├─→ 大模型服务
+          ├─→ RAG 检索 ───────→ Chroma 与 BM25
+          └─→ MCP 与本地工具 ─→ MCP Server
 ```
 
 主要技术栈包括：
@@ -202,15 +200,29 @@ flowchart TD
 
 整个迭代计划遵循以下顺序：
 
-```mermaid
-flowchart TD
-    S0["安全与权限"] --> S1["数据正确性与幂等"]
-    S1 --> S2["并发、任务与可靠 SSE"]
-    S2 --> S3["短期与长期记忆"]
-    S3 --> S4["RAG、MCP 与 Agent 可靠性"]
-    S4 --> S45["多 Agent 协作"]
-    S45 --> S5["测试、监控与部署"]
-    S5 --> S6["产品能力扩展"]
+```text
+安全与权限
+    │
+    ▼
+数据正确性与幂等
+    │
+    ▼
+并发、任务与可靠 SSE
+    │
+    ▼
+短期与长期记忆
+    │
+    ▼
+RAG、MCP 与 Agent 可靠性
+    │
+    ▼
+多 Agent 协作
+    │
+    ▼
+测试、监控与部署
+    │
+    ▼
+产品能力扩展
 ```
 
 优先级背后的考虑是：
@@ -269,16 +281,22 @@ flowchart TD
 
 目标是让 Web 请求不再承担完整的 AI 执行生命周期。
 
-```mermaid
-flowchart TD
-    WEB["Flask API"] --> DB["MySQL 消息与任务记录"]
-    WEB --> QUEUE["Redis 任务队列"]
-    QUEUE --> WORKER["AI Worker"]
-    WORKER --> MODEL["模型、RAG、MCP"]
-    WORKER --> DB
-    WORKER --> EVENTS["Redis Stream"]
-    EVENTS --> SSE["SSE Gateway"]
-    SSE --> FRONTEND["前端"]
+```text
+Flask API
+  ├─→ MySQL 消息与任务记录
+  └─→ Redis 任务队列
+              │
+              ▼
+          AI Worker
+          ├─→ 模型、RAG、MCP
+          ├─→ MySQL 消息与任务记录
+          └─→ Redis Stream
+                    │
+                    ▼
+               SSE Gateway
+                    │
+                    ▼
+                   前端
 ```
 
 计划包括：
@@ -296,11 +314,17 @@ flowchart TD
 
 计划将记忆拆成四层：
 
-```mermaid
-flowchart TD
-    W["工作记忆和单次请求状态"] --> S["短期记忆和当前会话消息"]
-    S --> E["情景记忆和会话主题摘要"]
-    E --> L["长期语义记忆和稳定偏好"]
+```text
+工作记忆和单次请求状态
+          │
+          ▼
+短期记忆和当前会话消息
+          │
+          ▼
+情景记忆和会话主题摘要
+          │
+          ▼
+长期语义记忆和稳定偏好
 ```
 
 主要内容：
@@ -326,7 +350,7 @@ RAG 方向：
 - 引用来源、页码和版本追溯。
 - 离线检索评测。
 
-当前进度：管理员 RAG 管理闭环、文档与切片双表、稳定 Chunk ID、索引原子切换、失败回滚和一致性检查已经完成；增量索引、多 Worker 协调和离线评测仍待实施。
+当前进度：管理员 RAG 管理闭环、文档与切片双表、完整切片元信息查看、稳定 Chunk ID、索引原子切换、失败回滚、一致性检查和双路元数据软过滤已经完成；增量索引、多 Worker 协调和离线评测仍待实施。
 
 MCP 方向：
 
@@ -348,18 +372,22 @@ Agent 方向：
 
 第一版多 Agent 不直接引入 A2A，而是优先完成内部任务图和统一 Agent Runtime。
 
-```mermaid
-flowchart TD
-    USER["用户问题"] --> ROUTER["任务路由"]
-    ROUTER -->|简单任务| SINGLE["单 Agent"]
-    ROUTER -->|复杂任务| COORDINATOR["协调 Agent"]
-    COORDINATOR --> A["专业 Agent A"]
-    COORDINATOR --> B["专业 Agent B"]
-    COORDINATOR --> T["工具 Agent"]
-    A --> REVIEW["评审与冲突检查"]
-    B --> REVIEW
-    T --> REVIEW
-    REVIEW --> SUMMARY["汇总唯一最终回答"]
+```text
+用户问题
+   │
+   ▼
+任务路由
+  ├─→ 简单任务：单 Agent
+  │
+  └─→ 复杂任务：协调 Agent
+           ├─→ 专业 Agent A ─┐
+           ├─→ 专业 Agent B ─┤
+           └─→ 工具 Agent ───┤
+                              ▼
+                       评审与冲突检查
+                              │
+                              ▼
+                       汇总唯一最终回答
 ```
 
 核心任务包括：
@@ -408,22 +436,29 @@ A2A 更适合独立服务、不同框架或跨组织 Agent 之间的发现与通
 
 经过主要阶段改造后，目标架构将从“请求内完成所有工作”演进为“API、任务和事件分离”：
 
-```mermaid
-flowchart TD
-    FRONTEND["Vue Web"] --> GATEWAY["API 与 SSE 网关"]
-    GATEWAY --> AUTH["JWT 与 Redis 登录状态"]
-    AUTH --> MYSQL["MySQL"]
-    GATEWAY --> MYSQL
-    GATEWAY --> QUEUE["Redis 任务队列"]
-    QUEUE --> WORKERS["AI Workers"]
-    WORKERS --> MEMORY["Memory Service"]
-    WORKERS --> RAG["RAG Service"]
-    WORKERS --> MCP["MCP Tool Runtime"]
-    WORKERS --> MODEL["Model Gateway"]
-    WORKERS --> MYSQL
-    WORKERS --> STREAM["Redis Stream"]
-    STREAM --> GATEWAY
-    GATEWAY --> FRONTEND
+```text
+Vue Web
+   │ 请求
+   ▼
+API 与 SSE 网关
+  ├─→ JWT 与 Redis 登录状态 ──→ MySQL
+  ├─→ MySQL
+  └─→ Redis 任务队列
+              │
+              ▼
+          AI Workers
+          ├─→ Memory Service
+          ├─→ RAG Service
+          ├─→ MCP Tool Runtime
+          ├─→ Model Gateway
+          ├─→ MySQL
+          └─→ Redis Stream
+                    │ 事件
+                    ▼
+              API 与 SSE 网关
+                    │ 响应
+                    ▼
+                 Vue Web
 ```
 
 这套架构的核心不是“组件越多越好”，而是明确每一层的职责：

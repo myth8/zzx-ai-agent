@@ -184,10 +184,17 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    QUERY["用户问题"] --> VECTOR["Chroma 语义召回"]
-    QUERY --> BM25["BM25 关键词召回"]
-    VECTOR --> FUSION["加权 RRF 融合"]
-    BM25 --> FUSION
+    QUERY["用户问题"] --> META["匹配 title 和 topics"]
+    META --> FILTER["命中时生成共同候选集"]
+    META --> FULL["未命中时使用全库"]
+    FILTER --> VECTORFILTER["Chroma 过滤召回"]
+    FILTER --> BM25FILTER["BM25 过滤召回"]
+    FULL --> VECTORFULL["Chroma 全库召回"]
+    FULL --> BM25FULL["BM25 全库召回"]
+    VECTORFILTER --> FUSION["加权 RRF 融合"]
+    BM25FILTER --> FUSION
+    VECTORFULL --> FUSION
+    BM25FULL --> FUSION
     FUSION --> RERANK["BGE Cross Encoder 重排序"]
     RERANK --> RESULT["返回高相关切片"]
     RESULT --> AGENT["Agent 生成最终回答"]
@@ -201,6 +208,27 @@ flowchart TD
 | Cross Encoder 重排序 | Top 3 |
 
 短查询提高 BM25 权重，长查询提高向量检索权重。Reranker 使用 `BAAI/bge-reranker-base`，首次查询时懒加载，模型下载完成后复用本机缓存和进程内实例。
+
+### 7.1 title 和 topics 元数据软过滤
+
+在线查询在正式召回前，对用户问题与文档的 `title`、`topics` 和兼容字段 `topic` 做一次轻量匹配：
+
+1. 统一大小写并去除空格、标点等非语义字符。
+2. 标题去除“恋爱常见问题”“篇”等通用部分，保留具有区分度的标题词。
+3. `topics` 同时支持原生列表和写入 Chroma 后的 JSON 字符串形式。
+4. 明确命中时，以源文档为单位选出全部候选切片。
+5. Chroma 使用相同 `source` 集合执行元数据过滤后的向量召回。
+6. BM25 仅使用同一批候选切片执行关键词召回。
+7. 没有任何明确命中时，两路都直接使用全库索引。
+
+这是一种保守的软过滤策略。元数据只决定候选范围，不直接参与向量相似度或 RRF 分数计算，也不会使用低置信度猜测强制排除文档。
+
+| 查询情况 | Chroma | BM25 |
+|---|---|---|
+| `title/topics` 明确命中 | 在命中文档内向量检索 | 在相同切片集合内关键词检索 |
+| 未命中 | 全库向量检索 | 全库关键词检索 |
+
+两路召回的范围始终保持一致，随后再进入原有的动态权重 RRF 和 Cross Encoder 重排序。
 
 ## 八、管理员接口
 
@@ -232,6 +260,7 @@ flowchart TD
 - 文档级元数据展示。
 - Markdown 全文查看。
 - 关系型切片详情。
+- 全部切片元信息查看，并标明文档继承、标题提取和切片生成来源。
 - Markdown 上传和删除。
 - 格式说明与 `示例.md` 下载。
 - 上传、切片、向量构建和刷新阶段提示。

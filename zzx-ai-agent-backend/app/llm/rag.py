@@ -41,6 +41,9 @@ FUSION_TOP_K = 5       # 融合后候选数量
 RERANK_TOP_K = 3       # 最终重排序后返回数量
 RAG_INDEX_SCHEMA_VERSION = 2
 
+_METADATA_FILTER_FIELDS = ("title", "topics", "topic")
+_METADATA_FILTER_MIN_TERM_LENGTH = 2
+
 
 # ==============================
 #  文档加载与切分
@@ -96,6 +99,102 @@ def _chroma_metadata(metadata: dict) -> dict:
         else:
             result[str(key)] = json.dumps(value, ensure_ascii=False, sort_keys=True)
     return result
+
+
+def _metadata_values(value) -> List[str]:
+    """Return scalar metadata values, including JSON-encoded list values."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith(("[", "{")):
+            try:
+                return _metadata_values(json.loads(stripped))
+            except (TypeError, ValueError):
+                pass
+        return [stripped] if stripped else []
+    if isinstance(value, dict):
+        result = []
+        for item in value.values():
+            result.extend(_metadata_values(item))
+        return result
+    if isinstance(value, (list, tuple, set)):
+        result = []
+        for item in value:
+            result.extend(_metadata_values(item))
+        return result
+    return [str(value)]
+
+
+def _normalize_metadata_match_text(value: str) -> str:
+    """Normalize Chinese/Latin metadata text for conservative substring matching."""
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", str(value).lower())
+
+
+def _title_filter_terms(value: str) -> List[str]:
+    """Extract the distinctive part of titles such as '恋爱常见问题 - 已婚篇'."""
+    terms = []
+    for part in re.split(r"[\s\-—–:：|/·,，、]+", str(value)):
+        normalized = _normalize_metadata_match_text(part)
+        normalized = re.sub(r"^(?:恋爱)?常见问题", "", normalized)
+        normalized = re.sub(r"篇$", "", normalized)
+        if len(normalized) >= _METADATA_FILTER_MIN_TERM_LENGTH:
+            terms.append(normalized)
+    return terms
+
+
+def _metadata_filter_terms(metadata: dict) -> Dict[str, List[str]]:
+    """Build conservative exact-substring terms from title and topic metadata."""
+    result = {}
+    for field in _METADATA_FILTER_FIELDS:
+        values = _metadata_values(metadata.get(field))
+        if field == "title":
+            terms = [term for value in values for term in _title_filter_terms(value)]
+        else:
+            terms = [
+                normalized
+                for value in values
+                if len(normalized := _normalize_metadata_match_text(value))
+                >= _METADATA_FILTER_MIN_TERM_LENGTH
+            ]
+        if terms:
+            result[field] = list(dict.fromkeys(terms))
+    return result
+
+
+def select_metadata_filtered_documents(query_text: str, docs: List[LCDocument]):
+    """
+    Select whole documents when title/topics explicitly occur in the query.
+
+    This is intentionally conservative: no metadata match means no filter, so
+    semantic and keyword recall continue to search the full knowledge base.
+    """
+    normalized_query = _normalize_metadata_match_text(query_text)
+    if len(normalized_query) < _METADATA_FILTER_MIN_TERM_LENGTH:
+        return [], {}
+
+    matched_sources = {}
+    seen_sources = set()
+    for doc in docs:
+        source = doc.metadata.get("source")
+        if not source or source in seen_sources:
+            continue
+        seen_sources.add(source)
+        field_terms = _metadata_filter_terms(doc.metadata)
+        matches = {
+            field: [term for term in terms if term in normalized_query]
+            for field, terms in field_terms.items()
+        }
+        matches = {field: terms for field, terms in matches.items() if terms}
+        if matches:
+            matched_sources[source] = matches
+
+    if not matched_sources:
+        return [], {}
+    filtered_docs = [
+        doc for doc in docs if doc.metadata.get("source") in matched_sources
+    ]
+    return filtered_docs, matched_sources
 
 
 def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
@@ -485,12 +584,16 @@ class RAGEngine:
         """
         with self._state_lock:
             self._active_queries += 1
+            docs = tuple(self._docs)
+            vector_store = self._vector_store
             vector_retriever = self._vector_retriever
             bm25_retriever = self._bm25_retriever
         try:
             return self._query_with_state(
                 query_text,
                 top_k,
+                docs,
+                vector_store,
                 vector_retriever,
                 bm25_retriever,
             )
@@ -498,23 +601,59 @@ class RAGEngine:
             self._release_query()
 
     def _query_with_state(
-        self, query_text, top_k, vector_retriever, bm25_retriever
+        self,
+        query_text,
+        top_k,
+        docs,
+        vector_store,
+        vector_retriever,
+        bm25_retriever,
     ):
-        if vector_retriever is None or bm25_retriever is None:
+        if vector_store is None or vector_retriever is None or bm25_retriever is None:
             return "知识库当前没有可检索的文档。"
 
         print(f"\n收到 RAG 查询，字符数: {len(query_text)}")
 
+        # ---------- 0. title/topics 轻量元数据预过滤 ----------
+        filtered_docs, metadata_matches = select_metadata_filtered_documents(
+            query_text,
+            docs,
+        )
+        if filtered_docs:
+            matched_sources = sorted(metadata_matches)
+            chroma_filter = (
+                {"source": matched_sources[0]}
+                if len(matched_sources) == 1
+                else {"source": {"$in": matched_sources}}
+            )
+            _, active_bm25_retriever = self._build_keyword_index(filtered_docs)
+            print(
+                "\n[元数据预过滤] "
+                f"title/topics 命中 {len(matched_sources)} 份文档、"
+                f"{len(filtered_docs)} 个切片: {', '.join(matched_sources)}"
+            )
+        else:
+            chroma_filter = None
+            active_bm25_retriever = bm25_retriever
+            print("\n[元数据预过滤] title/topics 未命中，使用全库检索")
+
         # ---------- 1. 向量检索 ----------
         print("\n[召回-1] 向量检索 (Chroma)...")
-        vector_docs = vector_retriever.invoke(query_text)
+        if chroma_filter is not None:
+            vector_docs = vector_store.similarity_search(
+                query_text,
+                k=min(VECTOR_TOP_K, len(filtered_docs)),
+                filter=chroma_filter,
+            )
+        else:
+            vector_docs = vector_retriever.invoke(query_text)
         print(f"   ✅ 召回 {len(vector_docs)} 个文档")
         if vector_docs:
             print(f"   最高分片段预览: {vector_docs[0].page_content[:60]}...")
 
         # ---------- 2. BM25 检索 ----------
         print("\n[召回-2] BM25 关键词检索...")
-        bm25_docs = bm25_retriever.invoke(query_text)
+        bm25_docs = active_bm25_retriever.invoke(query_text)
         print(f"   ✅ 召回 {len(bm25_docs)} 个文档")
         if bm25_docs:
             print(f"   最高分片段预览: {bm25_docs[0].page_content[:60]}...")
