@@ -1,4 +1,10 @@
-"""RAG document catalog and filesystem helpers."""
+"""
+RAG 原始文件与 MySQL 管理副本。
+
+documents 目录中的 Markdown 是原始内容来源；rag_documents 保存文档台账，
+rag_document_chunks 保存可查看、可审计的切片快照。Chroma/BM25 属于可重建
+索引，不替代原始文件和关系型管理数据。
+"""
 import hashlib
 import json
 import re
@@ -32,6 +38,7 @@ def normalize_markdown_filename(filename: str) -> str:
 
 
 def document_path(filename: str) -> Path:
+    """返回 documents 目录内的安全绝对路径，拒绝任何目录穿越。"""
     name = normalize_markdown_filename(filename)
     root = get_documents_dir()
     path = (root / name).resolve()
@@ -41,11 +48,17 @@ def document_path(filename: str) -> Path:
 
 
 def content_sha256(content: bytes) -> str:
+    """计算单个原始文件的内容指纹，写入 rag_documents.sha256。"""
     return hashlib.sha256(content).hexdigest()
 
 
 def _metadata_snapshot(path: Path):
-    """Build the document metadata and its materialized chunks."""
+    """
+    根据磁盘文件生成文档元数据和关系型切片快照。
+
+    这里直接复用在线索引的解析/切分函数，保证管理页面看到的切片与写入
+    Chroma、BM25 的切片规则完全相同，避免维护两套切分逻辑。
+    """
     from app.llm.rag import parse_markdown_document, split_markdown_file
 
     raw_text = path.read_text(encoding="utf-8")
@@ -72,7 +85,12 @@ def _decode_json_fields(row):
 
 
 def _replace_document_chunks(cur, document_id, chunks):
-    """Replace one document's relational chunk snapshot in the current transaction."""
+    """
+    在当前数据库事务中整体替换一份文档的切片快照。
+
+    调用方负责 commit/rollback，因此“先删旧切片、再插入新切片”对外是原子
+    操作。vector_id 使用相同 chunk_id，方便直接核对 MySQL 与 Chroma ID。
+    """
     cur.execute(
         "DELETE FROM rag_document_chunks WHERE document_id=%s",
         (document_id,),
@@ -100,7 +118,13 @@ def _replace_document_chunks(cur, document_id, chunks):
 
 
 def init_rag_tables():
-    """Create the RAG document catalog and import existing Markdown files."""
+    """
+    创建/兼容迁移 RAG 表，并把 documents 目录同步到数据库。
+
+    CREATE TABLE IF NOT EXISTS 负责全新环境；后续 SHOW COLUMNS + ALTER 负责
+    已有环境的小步兼容迁移。表结构准备完成后再同步文件，保证新环境只需
+    手动创建空数据库，启动应用即可得到文档台账和切片记录。
+    """
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -122,6 +146,7 @@ def init_rag_tables():
                     INDEX idx_rag_documents_uploader (uploaded_by)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            # 兼容早期已经存在、但缺少 document_metadata 的数据库。
             cur.execute("SHOW COLUMNS FROM rag_documents LIKE 'document_metadata'")
             if cur.fetchone() is None:
                 cur.execute(
@@ -135,6 +160,8 @@ def init_rag_tables():
                 cur.execute(
                     "ALTER TABLE rag_documents DROP COLUMN chunk_metadata"
                 )
+            # 切片单独成表后，可以建立唯一约束、按文档查询，并通过外键在
+            # 删除文档时自动级联删除，不再维护文档表里的重复 JSON 数组。
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS rag_document_chunks (
                     id             BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -165,7 +192,13 @@ def init_rag_tables():
 
 
 def sync_document_catalog():
-    """Make the database catalog reflect Markdown files already on disk."""
+    """
+    以 documents 目录为准，同步文档台账和关系型切片快照。
+
+    文件存在则 upsert 文档并重建其切片；数据库中存在但磁盘已不存在的记录
+    会被删除，外键随之级联删除切片。该函数同步的是管理数据，不负责生成
+    Chroma 向量，向量生命周期由 RAGEngine 管理。
+    """
     files = {}
     paths = sorted(
         path for path in get_documents_dir().iterdir()
@@ -176,6 +209,8 @@ def sync_document_catalog():
         document_metadata, chunks = _metadata_snapshot(path)
         files[path.name] = (
             len(content),
+            # 每份文件自己的 SHA-256 用于展示和审计；它与 rag.py 中覆盖整个
+            # documents 目录的 source_signature 作用不同。
             content_sha256(content),
             document_metadata,
             chunks,
@@ -217,6 +252,7 @@ def sync_document_catalog():
                 document_id = cur.fetchone()["id"]
                 _replace_document_chunks(cur, document_id, chunks)
 
+            # 磁盘是原始内容来源，已从磁盘删除的文件不应继续留在管理台账。
             missing = set(known) - set(files)
             for filename in missing:
                 cur.execute(
@@ -264,6 +300,7 @@ def get_document(document_id):
 
 
 def create_document(filename, content, uploaded_by):
+    """写入新文档台账和切片快照；向量索引由上层接口随后刷新。"""
     from app.llm.rag import parse_markdown_document, split_markdown_text
 
     text = content.decode("utf-8")
@@ -277,6 +314,8 @@ def create_document(filename, content, uploaded_by):
                 "INSERT INTO rag_documents "
                 "(filename, display_name, file_size, sha256, chunk_count, "
                 "document_metadata, status, uploaded_by) "
+                # 此时只完成原文件/关系数据，Chroma 尚未重建，所以先标记
+                # indexing；索引刷新成功后由 update_index_results 改为 ready。
                 "VALUES (%s, %s, %s, %s, %s, %s, 'indexing', %s)",
                 (
                     filename,
@@ -337,7 +376,12 @@ def list_all_chunk_ids():
 
 
 def update_index_results(chunk_counts, status="ready", last_error=None):
-    """Update indexing results for all cataloged documents."""
+    """
+    索引发布成功后，用同一版源文件刷新 MySQL 切片快照和文档状态。
+
+    先清空全部关系型切片，再按 RAGEngine 返回的 source -> count 重建；整个
+    过程位于一个事务中，失败会整体回滚，不会留下半套数据库切片。
+    """
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -369,7 +413,7 @@ def update_index_results(chunk_counts, status="ready", last_error=None):
                     ),
                 )
                 _replace_document_chunks(cur, row["id"], chunks)
-        conn.commit()
+        conn.commit() # 事务提交点
     finally:
         conn.close()
 

@@ -1,9 +1,13 @@
 """Tests for administrator-only RAG document management."""
 import io
 import os
+import sys
 import tempfile
+import threading
+import types
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -133,6 +137,41 @@ class RagFilenameTest(unittest.TestCase):
         full_bm25_retriever.invoke.assert_not_called()
         self.assertIn("只属于异地恋的内容", result)
         self.assertNotIn("不应进入结果的内容", result)
+
+    def test_reranker_is_initialized_once_for_concurrent_queries(self):
+        from app.llm.rag import RAGEngine
+
+        engine = RAGEngine.__new__(RAGEngine)
+        engine._reranker = None
+        engine._reranker_initialized = False
+        engine._reranker_lock = threading.Lock()
+
+        model = object()
+        load_started = threading.Event()
+        allow_load_to_finish = threading.Event()
+        load_calls = []
+
+        def fake_cross_encoder(model_name):
+            load_calls.append(model_name)
+            load_started.set()
+            allow_load_to_finish.wait(timeout=2)
+            return model
+
+        fake_module = types.SimpleNamespace(CrossEncoder=fake_cross_encoder)
+        with (
+            patch.dict(sys.modules, {"sentence_transformers": fake_module}),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            first = executor.submit(engine._get_reranker)
+            self.assertTrue(load_started.wait(timeout=2))
+            second = executor.submit(engine._get_reranker)
+            allow_load_to_finish.set()
+
+            self.assertIs(first.result(timeout=2), model)
+            self.assertIs(second.result(timeout=2), model)
+
+        self.assertEqual(load_calls, ["BAAI/bge-reranker-base"])
+        self.assertTrue(engine._reranker_initialized)
 
 
 class RagAdminRouteTest(unittest.TestCase):

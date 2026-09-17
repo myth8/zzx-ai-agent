@@ -1,4 +1,4 @@
-"""Administrator-only RAG document management APIs."""
+"""管理员 RAG 文档接口，以及文件、MySQL、索引三者的一致性编排。"""
 import os
 import threading
 import uuid
@@ -22,6 +22,8 @@ from app.rag_documents import (
 
 
 rag_admin_bp = Blueprint("rag_admin", __name__, url_prefix="/api/admin/rag")
+# 上传、删除和手动重建都会修改同一套文件与索引。同一进程内串行执行这些
+# 操作，避免两个请求同时重建并互相覆盖；多进程部署仍需升级为分布式锁。
 _mutation_lock = threading.Lock()
 
 
@@ -49,6 +51,7 @@ def _serialize_document(row):
 
 
 def _refresh_index(force=False):
+    """先发布新的在线索引，再把该版本的切片结果同步到 MySQL。"""
     from app.llm.rag import rebuild_engine
 
     result = rebuild_engine(force=force)
@@ -57,7 +60,7 @@ def _refresh_index(force=False):
 
 
 def _restore_index_after_rollback():
-    """Best-effort repair when a filesystem mutation has been rolled back."""
+    """文件操作回滚后，尽力让已初始化的在线索引重新匹配磁盘内容。"""
     try:
         from app.llm.rag import rebuild_initialized_engine
 
@@ -69,12 +72,19 @@ def _restore_index_after_rollback():
 
 
 def _index_status():
+    """
+    汇总源文件、manifest、Chroma 和 MySQL 四层一致性状态。
+
+    inspect_index_status 已比较源文件签名与 Chroma 向量 ID；这里再比较 MySQL
+    chunk_id。只有三侧切片 ID 集合都一致，管理页面才显示 UP_TO_DATE。
+    """
     from app.llm.rag import inspect_index_status
 
     result = inspect_index_status(
         current_app.config["RAG_DOCUMENTS_DIR"],
         current_app.config["RAG_CHROMA_DIR"],
     )
+    # expected_ids 由当前磁盘文件按当前切片规则重新计算，是本次核对的基准。
     expected_ids = set(result.pop("expected_chunk_ids", []))
     database_ids = list_all_chunk_ids()
     result["database_chunk_count"] = len(database_ids)
@@ -168,6 +178,8 @@ def upload_document():
     if not body.strip() or not chunks:
         return _error("Markdown 文档必须包含正文", 400, "RAG_BODY_EMPTY")
 
+    # 下方是一个跨文件系统、MySQL、Chroma 的业务事务。它们无法共享数据库
+    # transaction，因此通过临时文件和补偿操作实现“失败后回到原状态”。
     with _mutation_lock:
         path = document_path(filename)
         if path.exists():
@@ -176,6 +188,8 @@ def upload_document():
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.uploading")
         document_id = None
         try:
+            # 先写隐藏临时文件，再原子替换为正式文件，避免其他线程读到
+            # 只写入一部分的 Markdown。
             temporary.write_bytes(content)
             os.replace(temporary, path)
             document_id = create_document(
@@ -189,6 +203,8 @@ def upload_document():
             temporary.unlink(missing_ok=True)
             return _error("同名文档已存在", 409, "RAG_DOCUMENT_EXISTS")
         except Exception as exc:
+            # 任一步失败都删除新文件和数据库记录，并按恢复后的磁盘目录重建
+            # 已初始化索引。这里采用补偿事务，而不是留下“文件已上传但不可查”。
             temporary.unlink(missing_ok=True)
             path.unlink(missing_ok=True)
             if document_id is not None:
@@ -220,11 +236,14 @@ def delete_document(document_id):
         path = document_path(row["filename"])
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.deleting")
         try:
+            # 先把正式文件改名为临时文件，相当于可恢复的逻辑删除。索引会按
+            # “文件已不存在”的目录快照重建，成功后才删除 MySQL 台账和临时文件。
             if path.exists():
                 os.replace(path, temporary)
             index_result = _refresh_index()
             delete_document_record(document_id)
         except Exception:
+            # 索引构建失败时把文件恢复原名，并恢复旧目录对应的在线索引。
             if temporary.exists():
                 os.replace(temporary, path)
             _restore_index_after_rollback()
@@ -241,8 +260,11 @@ def delete_document(document_id):
 @rag_admin_bp.post("/rebuild")
 @admin_required
 def rebuild_index():
+    """仅在四层一致性检查发现变化时执行手动全量重建。"""
     with _mutation_lock:
         try:
+            # 先检查可避免用户重复点击时反复计算 Embedding。before 同时保留
+            # 具体 reason_code，重建响应可说明本次为何需要执行。
             before = _index_status()
             if before["up_to_date"]:
                 return _ok(
@@ -250,6 +272,7 @@ def rebuild_index():
                     "当前索引已经是最新，无需重建",
                 )
             result = _refresh_index(force=True)
+            # 重建后再次核对，而不是仅凭 rebuild 没抛异常就宣称索引可用。
             after = _index_status()
         except Exception:
             current_app.logger.exception("Manual RAG index rebuild failed")

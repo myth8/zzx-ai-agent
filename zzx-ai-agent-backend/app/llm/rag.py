@@ -1,6 +1,13 @@
 """
-RAG 管道 — LangChain + Chroma + BM25 + Cross-Encoder 重排序
-完全基于 LangChain 实现，无 llama_index 依赖
+RAG 检索与索引生命周期。
+
+这个模块同时负责两类事情：
+1. 将 documents 目录中的 Markdown 解析、切片并构建 Chroma/BM25 索引；
+2. 在线查询时执行元数据预过滤、双路召回、RRF 融合和重排序。
+
+索引更新采用“先构建新版本，再切换引用”的方式。旧查询仍然持有旧
+collection，最后一个旧查询结束后才删除旧 collection，避免重建过程中
+出现短暂无索引或正在查询的数据被删除。
 """
 
 import os
@@ -39,6 +46,9 @@ VECTOR_TOP_K = 10      # 向量检索召回数量
 BM25_TOP_K = 10        # BM25 召回数量
 FUSION_TOP_K = 5       # 融合后候选数量
 RERANK_TOP_K = 3       # 最终重排序后返回数量
+# 索引结构版本描述“切片和向量 ID 的生成规则”，不是文档内容版本。
+# 修改切片规则、chunk_id 规则或必须重建的元数据结构时需要递增该值，
+# 让旧 manifest 自动失效，避免用新代码读取语义不兼容的旧索引。
 RAG_INDEX_SCHEMA_VERSION = 2
 
 _METADATA_FILTER_FIELDS = ("title", "topics", "topic")
@@ -72,7 +82,7 @@ def _json_metadata_value(value):
 
 
 def parse_markdown_document(text: str) -> Tuple[dict, str]:
-    """Return parsed YAML metadata and Markdown body without front matter."""
+    """解析 YAML Front Matter，并返回不含 Front Matter 的正文。"""
     normalized = str(text or "").lstrip("\ufeff")
     match = _FRONT_MATTER_PATTERN.match(normalized)
     if match is None:
@@ -89,7 +99,7 @@ def parse_markdown_document(text: str) -> Tuple[dict, str]:
 
 
 def _chroma_metadata(metadata: dict) -> dict:
-    """Convert rich YAML values to scalar values accepted by Chroma."""
+    """把 YAML 丰富类型转换成 Chroma 支持的标量元数据。"""
     result = {}
     for key, value in metadata.items():
         if value is None:
@@ -97,12 +107,14 @@ def _chroma_metadata(metadata: dict) -> dict:
         if isinstance(value, (str, int, float, bool)):
             result[str(key)] = value
         else:
+            # Chroma metadata 只能直接保存标量。topics/audience 等列表转成
+            # JSON 字符串，读取时仍可无损恢复，也能显示在切片详情页面。
             result[str(key)] = json.dumps(value, ensure_ascii=False, sort_keys=True)
     return result
 
 
 def _metadata_values(value) -> List[str]:
-    """Return scalar metadata values, including JSON-encoded list values."""
+    """将标量、容器或 JSON 字符串统一展开成可匹配的字符串列表。"""
     if value is None:
         return []
     if isinstance(value, str):
@@ -164,10 +176,11 @@ def _metadata_filter_terms(metadata: dict) -> Dict[str, List[str]]:
 
 def select_metadata_filtered_documents(query_text: str, docs: List[LCDocument]):
     """
-    Select whole documents when title/topics explicitly occur in the query.
+    使用 title/topics 做保守的文档级预过滤。
 
-    This is intentionally conservative: no metadata match means no filter, so
-    semantic and keyword recall continue to search the full knowledge base.
+    返回值中的 filtered_docs 为空表示“不启用过滤”，不是“没有结果”。调用方
+    此时必须让 Chroma 和 BM25 同时搜索全库。只有查询明确包含标题或主题词
+    时才返回候选文档，避免错误分类导致相关文档在向量检索前就被排除。
     """
     normalized_query = _normalize_metadata_match_text(query_text)
     if len(normalized_query) < _METADATA_FILTER_MIN_TERM_LENGTH:
@@ -179,6 +192,8 @@ def select_metadata_filtered_documents(query_text: str, docs: List[LCDocument]):
         source = doc.metadata.get("source")
         if not source or source in seen_sources:
             continue
+        # title/topics 是文档级元数据，会被复制到该文档的每个切片。
+        # 每个 source 检查一次即可，没必要对同一文档的所有切片重复匹配。
         seen_sources.add(source)
         field_terms = _metadata_filter_terms(doc.metadata)
         matches = {
@@ -191,6 +206,8 @@ def select_metadata_filtered_documents(query_text: str, docs: List[LCDocument]):
 
     if not matched_sources:
         return [], {}
+    # 命中后保留整份源文档的所有切片。元数据负责缩小文档范围，真正决定
+    # 哪些切片更相关的工作仍交给后续向量检索、BM25 和 Reranker。
     filtered_docs = [
         doc for doc in docs if doc.metadata.get("source") in matched_sources
     ]
@@ -198,7 +215,9 @@ def select_metadata_filtered_documents(query_text: str, docs: List[LCDocument]):
 
 
 def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
-    """Split one Markdown document with stable source and chunk metadata."""
+    """切分一份 Markdown，并为每个切片生成可追踪的稳定元数据。"""
+    # Front Matter 只作为元数据继承给切片，不进入 page_content，避免
+    # title/status/category 等配置文本被错误地当成一个知识片段参与召回。
     rich_file_meta, body = parse_markdown_document(text)
     file_meta = _chroma_metadata(rich_file_meta)
     if source:
@@ -210,6 +229,7 @@ def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=headers_to_split_on,
+        # 标题本身保留在正文中，使标题语义也能进入 Embedding 和 BM25。
         strip_headers=False,
     )
     char_splitter = RecursiveCharacterTextSplitter(
@@ -220,6 +240,8 @@ def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
 
     chunks = []
     for header_chunk in markdown_splitter.split_text(body):
+        # 每个切片先继承文档 Front Matter，再覆盖当前标题上下文。
+        # 因此一个切片同时知道“来自哪份文档”和“属于哪个章节”。
         chunk_meta = dict(file_meta)
         if header_chunk.metadata:
             chunk_meta.update(header_chunk.metadata)
@@ -227,6 +249,7 @@ def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
         if len(header_chunk.page_content) < 600:
             chunks.append(header_chunk)
         else:
+            # 标题块过长时再按字符递归切分，但继续复制同一份文档/标题元数据。
             for sub_chunk in char_splitter.split_documents([header_chunk]):
                 sub_meta = dict(chunk_meta)
                 if sub_chunk.metadata:
@@ -237,9 +260,13 @@ def split_markdown_text(text: str, source: str = "") -> List[LCDocument]:
     for index, chunk in enumerate(chunks, 1):
         chunk.metadata["chunk_index"] = index
         chunk.metadata["char_count"] = len(chunk.page_content)
+        # content_sha256 只反映当前切片正文，用于判断内容是否变化和审计。
         chunk.metadata["content_sha256"] = hashlib.sha256(
             chunk.page_content.encode("utf-8")
         ).hexdigest()
+        # chunk_id 同时写入 MySQL chunk_id/vector_id 和 Chroma record ID。
+        # source + 顺序 + 内容指纹确保同一版本可重复生成相同 ID；文件改名、
+        # 切片位置变化或正文变化都会产生新 ID，从而暴露索引需要更新。
         chunk.metadata["chunk_id"] = hashlib.sha256(
             f"{source}\0{index}\0{chunk.metadata['content_sha256']}".encode("utf-8")
         ).hexdigest()[:24]
@@ -279,6 +306,16 @@ def load_and_split_documents(doc_dir: str) -> List[LCDocument]:
 
 
 def _source_signature(documents_dir):
+    """
+    计算整个 Markdown 源目录的内容签名。
+
+    文件按名称排序后，将“文件名 + 分隔符 + 原始字节 + 分隔符”依次送入
+    SHA-256。因此新增、删除、改名或修改任意文件都会改变签名；排序和明确
+    分隔符保证同一组文件无论文件系统枚举顺序如何都得到相同结果。
+
+    该签名用于快速判断“索引对应的源文件集合是否仍是当前版本”，不同于
+    rag_documents.sha256：后者是一份文件的内容指纹，这里是整个知识库快照。
+    """
     digest = hashlib.sha256()
     paths = sorted(
         path for path in Path(documents_dir).iterdir()
@@ -293,10 +330,19 @@ def _source_signature(documents_dir):
 
 
 def inspect_index_status(documents_dir, chroma_dir):
-    """Inspect persisted source/vector consistency without loading model weights."""
+    """
+    检查源文件、manifest 与 Chroma 是否一致，不加载 Embedding 模型。
+
+    检查顺序从成本较低、错误更基础的条件开始：manifest 是否存在且合法、
+    索引结构版本、源目录内容签名、collection 名称、collection 可读取性，
+    最后比较预期 chunk_id 与实际向量 ID 集合。返回 reason_code 供前端显示
+    明确原因，也供“检查并重建”决定是否跳过耗时的 Embedding。
+    """
     documents_dir = str(documents_dir)
     chroma_dir = str(chroma_dir)
     manifest_path = Path(chroma_dir) / "rag_index_manifest.json"
+    # 只执行确定性的 Markdown 切片，不初始化模型。由当前源文件重新计算出的
+    # chunk_id 集合就是“当前代码规则下应该存在的向量 ID 集合”。
     expected_chunks = []
     for path in sorted(Path(documents_dir).glob("*")):
         if path.is_file() and path.suffix.lower() == ".md":
@@ -314,6 +360,7 @@ def inspect_index_status(documents_dir, chroma_dir):
         "reason_code": "",
         "expected_chunk_ids": sorted(expected_ids),
     }
+    # manifest 是当前有效 collection 的轻量指针和版本凭证。
     if not manifest_path.is_file():
         return {**base, "reason": "尚未建立索引", "reason_code": "MANIFEST_MISSING"}
     try:
@@ -325,8 +372,10 @@ def inspect_index_status(documents_dir, chroma_dir):
         "collection_name": manifest.get("collection_name"),
         "indexed_at": manifest.get("indexed_at"),
     })
+    # 结构版本不一致意味着即使源文档没变，切片/ID 规则也可能已经变化。
     if manifest.get("schema_version") != RAG_INDEX_SCHEMA_VERSION:
         return {**base, "reason": "索引结构版本已过期", "reason_code": "SCHEMA_OUTDATED"}
+    # 内容签名不一致覆盖新增、删除、改名、修改四类源文件变化。
     if manifest.get("source_signature") != _source_signature(documents_dir):
         return {**base, "reason": "源文档内容已经发生变化", "reason_code": "SOURCE_CHANGED"}
     if not manifest.get("collection_name"):
@@ -341,6 +390,7 @@ def inspect_index_status(documents_dir, chroma_dir):
         return {**base, "reason": "向量 collection 不存在或无法读取", "reason_code": "COLLECTION_UNAVAILABLE"}
 
     base["indexed_chunk_count"] = len(stored_ids)
+    # 数量相同也不代表一致，因此比较完整集合而不是只比较 count。
     if stored_ids != expected_ids:
         return {**base, "reason": "向量记录与当前切片不一致", "reason_code": "VECTOR_MISMATCH"}
     return {**base, "up_to_date": True, "reason": "当前索引已经是最新", "reason_code": "UP_TO_DATE"}
@@ -369,8 +419,12 @@ class RAGEngine:
         self._manifest_path = Path(self._chroma_dir) / "rag_index_manifest.json"
         os.makedirs(self._documents_dir, exist_ok=True)
         os.makedirs(self._chroma_dir, exist_ok=True)
+        # state_lock 只保护当前索引引用和查询计数，持锁时间必须很短；
+        # rebuild_lock 则保证同一进程一次只有一个全量重建，避免重复消耗资源。
         self._state_lock = threading.Lock()
         self._rebuild_lock = threading.Lock()
+        # active_queries 记录仍持有旧索引快照的查询。重建切换后不能立即删除
+        # 旧 collection，要等计数归零后再清理。
         self._active_queries = 0
         self._retired_stores = []
         self._docs = []
@@ -378,7 +432,12 @@ class RAGEngine:
         self._vector_retriever = None
         self._bm25 = None
         self._bm25_retriever = None
+        # Reranker 在第一次真实查询时才加载。单独使用初始化锁，避免多个首次
+        # 请求重复加载同一模型；不复用 state_lock，防止慢速模型加载阻塞查询
+        # 获取索引快照。
         self._reranker = None
+        self._reranker_initialized = False
+        self._reranker_lock = threading.Lock()
         self._stats = {
             "document_count": 0,
             "chunk_count": 0,
@@ -391,6 +450,7 @@ class RAGEngine:
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )
+        # 启动优先复用已验证的持久化 collection；任一校验不通过才全量重建。
         if not self._load_existing_index():
             self.rebuild()
 
@@ -407,11 +467,12 @@ class RAGEngine:
         return bm25, retriever
 
     def _load_existing_index(self):
-        """Reuse a complete persisted collection when source files are unchanged."""
+        """源文件和向量记录均一致时，复用磁盘上的 Chroma collection。"""
         if not self._manifest_path.is_file():
             return False
         try:
             manifest = json.loads(self._manifest_path.read_text(encoding="utf-8"))
+            # 先用 manifest 做廉价判断，失败就交给 rebuild 创建新 collection。
             if manifest.get("schema_version") != RAG_INDEX_SCHEMA_VERSION:
                 return False
             if manifest.get("source_signature") != self._document_signature():
@@ -423,6 +484,8 @@ class RAGEngine:
                 embedding_function=self._embed_model,
                 persist_directory=self._chroma_dir,
             )
+            # 内容签名只能证明源文件未变；再比较完整 ID 集合，防止 collection
+            # 被部分删除、写入中断或混入额外向量。
             stored_ids = set(store.get()["ids"])
             expected_ids = {doc.metadata["chunk_id"] for doc in docs}
             if stored_ids != expected_ids:
@@ -431,6 +494,7 @@ class RAGEngine:
                 store.as_retriever(search_kwargs={"k": VECTOR_TOP_K})
                 if docs else None
             )
+            # Chroma 持久化在磁盘，BM25 是进程内对象，应用重启后必须重建。
             bm25, bm25_retriever = self._build_keyword_index(docs)
             counts = Counter(
                 doc.metadata.get("source", "") for doc in docs
@@ -453,6 +517,9 @@ class RAGEngine:
             return False
 
     def _write_manifest(self, collection_name, source_signature):
+        """原子写入当前有效索引的轻量清单。"""
+        # 先完整写临时文件，再通过 os.replace 原子替换。进程中断时不会留下
+        # 半截 JSON，读者只会看到旧 manifest 或完整的新 manifest。
         temporary = self._manifest_path.with_name(
             f".{self._manifest_path.name}.{uuid.uuid4().hex}.tmp"
         )
@@ -476,6 +543,7 @@ class RAGEngine:
                 print(f"清理旧 RAG collection 失败: {exc}")
 
     def _release_query(self):
+        """释放一次查询快照，并在最后一个旧查询结束后清理退役索引。"""
         retired = []
         with self._state_lock:
             self._active_queries -= 1
@@ -485,10 +553,19 @@ class RAGEngine:
         self._dispose_stores(retired)
 
     def rebuild(self):
-        """Build a new collection first, then atomically switch query state."""
+        """
+        全量构建一套新索引，成功后再原子发布，失败时保留当前索引。
+
+        这是简化的蓝绿切换：新 collection 使用随机名称，与线上 collection
+        隔离；Chroma、BM25 和 manifest 全部准备成功后，才在 state_lock 内
+        一次性替换查询所需的全部引用。
+        """
         with self._rebuild_lock:
             docs = load_and_split_documents(self._documents_dir)
+            # 签名必须和本次实际读取的源文件处于同一重建过程，用于下次启动
+            # 或管理员检查时确认 collection 对应的是哪一版文件集合。
             source_signature = self._document_signature()
+            # 不复用固定 collection 名，避免失败的重建污染当前可用索引。
             collection_name = f"love_rag_{uuid.uuid4().hex}"
             new_store = None
             try:
@@ -513,8 +590,10 @@ class RAGEngine:
                     vector_retriever = None
                     bm25 = None
                     bm25_retriever = None
+                # 只有两路索引都构建成功后才发布 manifest。
                 self._write_manifest(collection_name, source_signature)
             except Exception:
+                # 新版本失败只清理新 collection，当前线上索引引用完全不动。
                 if new_store is not None:
                     self._dispose_stores([new_store])
                 raise
@@ -531,6 +610,8 @@ class RAGEngine:
 
             retired = []
             with self._state_lock:
+                # 在同一个短临界区内替换 docs、Chroma、BM25 和统计数据，
+                # 查询线程不会观察到“向量是新版但 BM25 还是旧版”的混合状态。
                 old_store = self._vector_store
                 self._docs = docs
                 self._vector_store = new_store
@@ -540,6 +621,8 @@ class RAGEngine:
                 self._stats = result
                 if old_store is not None:
                     self._retired_stores.append(old_store)
+                # 没有正在运行的查询时可立即删除旧 collection；否则由最后一个
+                # 查询在 _release_query 中完成延迟清理。
                 if self._active_queries == 0:
                     retired = self._retired_stores
                     self._retired_stores = []
@@ -556,8 +639,16 @@ class RAGEngine:
             }
 
     def _get_reranker(self):
-        """懒加载 Cross-Encoder 重排序模型"""
-        if self._reranker is None:
+        """线程安全地懒加载 Cross-Encoder；同一进程最多初始化一次。"""
+        # 快速路径：加载完成后的普通查询无需每次竞争初始化锁。
+        if self._reranker_initialized:
+            return self._reranker
+
+        with self._reranker_lock:
+            # 等待锁期间，另一个线程可能已经完成初始化，必须再次检查。
+            if self._reranker_initialized:
+                return self._reranker
+
             try:
                 from sentence_transformers import CrossEncoder
                 print("   🔄 正在加载 Cross-Encoder 重排序模型 (BAAI/bge-reranker-base)...")
@@ -566,6 +657,11 @@ class RAGEngine:
             except ImportError:
                 print("   ⚠️ 未安装 sentence-transformers，重排序功能将跳过")
                 self._reranker = None
+            # initialized 与模型对象分开记录：True + None 表示已经确认依赖
+            # 不可用，后续查询直接降级，不再反复尝试 import。
+            # CrossEncoder 构造时若出现网络/文件等其他异常，本行不会执行，
+            # 异常继续抛出且 initialized 保持 False，后续请求仍有机会重试。
+            self._reranker_initialized = True
         return self._reranker
 
     @staticmethod
@@ -583,6 +679,8 @@ class RAGEngine:
         执行多路召回 → 加权 RRF 融合 → Cross-Encoder 重排序 → 返回最终结果。
         """
         with self._state_lock:
+            # 查询开始时一次性取得同一版本的只读快照。随后即使发生索引切换，
+            # 本次查询的 Chroma、BM25 和 docs 仍来自同一个旧版本。
             self._active_queries += 1
             docs = tuple(self._docs)
             vector_store = self._vector_store
@@ -626,6 +724,8 @@ class RAGEngine:
                 if len(matched_sources) == 1
                 else {"source": {"$in": matched_sources}}
             )
+            # Chroma 使用 source filter；BM25 没有动态 where 条件，因此直接在
+            # 完全相同的候选切片上创建轻量索引，保证两路召回范围一致。
             _, active_bm25_retriever = self._build_keyword_index(filtered_docs)
             print(
                 "\n[元数据预过滤] "
@@ -633,6 +733,7 @@ class RAGEngine:
                 f"{len(filtered_docs)} 个切片: {', '.join(matched_sources)}"
             )
         else:
+            # 没有高置信度元数据命中时不做硬过滤，两路同时回退全库。
             chroma_filter = None
             active_bm25_retriever = bm25_retriever
             print("\n[元数据预过滤] title/topics 未命中，使用全库检索")
@@ -662,6 +763,8 @@ class RAGEngine:
         w_vec, w_bm25 = self._compute_weights(query_text)
         print(f"\n[融合] 权重分配: 向量={w_vec:.1f}, BM25={w_bm25:.1f}")
 
+        # RRF 使用名次而不是两种模型不可直接比较的原始分数。k_const 越大，
+        # 前几名之间的分差越平缓；两路都命中的切片会累加两份贡献。
         k_const = 60
         score_map: Dict[str, float] = {}
         text_map: Dict[str, str] = {}
@@ -692,6 +795,8 @@ class RAGEngine:
             return "未找到相关信息。"
 
         # ---------- 4. Cross-Encoder 重排序 ----------
+        # 双路召回解决“尽量不要漏”，Cross-Encoder 读取 query 与完整候选正文，
+        # 负责在较小候选集中提高最终排序精度。
         reranker = self._get_reranker()
         if reranker is not None:
             print("\n[重排序] 使用 Cross-Encoder 重新计算相关性...")
@@ -745,7 +850,13 @@ def get_engine() -> RAGEngine:
 
 
 def rebuild_engine(force=False):
-    """Rebuild all RAG indexes and atomically publish the new query state."""
+    """
+    获取引擎并发布最新索引。
+
+    force 当前用于保留管理接口的调用语义；是否需要重建由路由层的完整一致性
+    检查决定。引擎已经初始化时调用本函数会执行 rebuild；未初始化时，构造
+    RAGEngine 会自行判断复用现有索引还是重建。
+    """
     global _engine
     if _engine is None:
         engine = get_engine()
