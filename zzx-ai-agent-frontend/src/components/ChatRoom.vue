@@ -55,6 +55,7 @@
           :placeholder="aiType === 'love' ? '说说你的感受或正在经历的关系问题…' : '描述目标、问题，或希望智能体完成的任务…'"
           class="input-box"
           rows="1"
+          maxlength="4000"
           :disabled="connectionStatus === 'connecting'"
         ></textarea>
         <div class="composer-bottom">

@@ -30,7 +30,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4.8 20c.8-4 3.2-6 7.2-6s6.4 2 7.2 6"/></svg>
               </span>
-              <input id="register-username" v-model="form.username" type="text" placeholder="3–50 个字符" autocomplete="username">
+              <input id="register-username" v-model="form.username" type="text" minlength="3" maxlength="50" placeholder="3–50 个字符" autocomplete="username">
             </div>
           </div>
           <div class="field">
@@ -39,7 +39,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 16-.8 4 4-.8L18 8.4 15.6 6 4 16Z"/><path d="m13.8 7.8 2.4 2.4"/></svg>
               </span>
-              <input id="register-nickname" v-model="form.nickname" type="text" placeholder="怎么称呼你？" autocomplete="name">
+              <input id="register-nickname" v-model="form.nickname" type="text" maxlength="50" placeholder="怎么称呼你？" autocomplete="name">
             </div>
           </div>
           <div class="field">
@@ -48,7 +48,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
               </span>
-              <input id="register-password" v-model="form.password" type="password" placeholder="至少 6 位密码" autocomplete="new-password">
+              <input id="register-password" v-model="form.password" type="password" minlength="8" maxlength="128" placeholder="8–128 位密码" autocomplete="new-password">
             </div>
           </div>
           <div class="field">
@@ -57,7 +57,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="m9.5 15 1.7 1.7 3.6-3.6"/></svg>
               </span>
-              <input id="register-confirm" v-model="form.confirmPassword" type="password" placeholder="再次输入密码" autocomplete="new-password">
+              <input id="register-confirm" v-model="form.confirmPassword" type="password" minlength="8" maxlength="128" placeholder="再次输入密码" autocomplete="new-password">
             </div>
           </div>
           <div class="field">
@@ -66,7 +66,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M15 4h4v4M12 15h3M14 13v4"/></svg>
               </span>
-              <input id="register-invite" v-model="form.inviteCode" type="password" placeholder="有邀请码时填写" autocomplete="off">
+              <input id="register-invite" v-model="form.inviteCode" type="password" maxlength="256" placeholder="有邀请码时填写" autocomplete="off">
             </div>
           </div>
           <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
@@ -107,8 +107,8 @@ async function handleRegister() {
     errorMsg.value = "两次输入的密码不一致"
     return
   }
-  if (form.password.length < 6) {
-    errorMsg.value = "密码长度至少 6 位"
+  if (form.password.length < 8 || form.password.length > 128) {
+    errorMsg.value = "密码长度必须为 8–128 位"
     return
   }
   if (form.username.trim().length < 3) {
@@ -124,12 +124,12 @@ async function handleRegister() {
       form.inviteCode.trim()
     )
     if (res.code !== 0) {
-      errorMsg.value = res.msg || "注册失败"
+      errorMsg.value = res.message || res.msg || "注册失败"
       return
     }
     router.push("/login?registered=1")
   } catch (e) {
-    errorMsg.value = e.response?.data?.msg || "网络错误，请稍后重试"
+    errorMsg.value = e.response?.data?.message || "网络错误，请稍后重试"
   } finally {
     loading.value = false
   }

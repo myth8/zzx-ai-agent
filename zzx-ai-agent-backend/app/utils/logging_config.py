@@ -2,6 +2,8 @@
 import logging
 import re
 
+from flask import g, has_request_context
+
 
 _PATTERNS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -24,7 +26,17 @@ class RedactingFilter(logging.Filter):
     def filter(self, record):
         record.msg = redact(record.getMessage())
         record.args = ()
+        record.request_id = (
+            getattr(g, "request_id", "-") if has_request_context() else "-"
+        )
         return True
+
+
+class RedactingFormatter(logging.Formatter):
+    """连同异常堆栈一起脱敏；Filter 单独处理 record.msg 并不覆盖 traceback。"""
+
+    def format(self, record):
+        return redact(super().format(record))
 
 
 def configure_logging(level="INFO"):
@@ -32,9 +44,16 @@ def configure_logging(level="INFO"):
     resolved_level = getattr(logging, str(level).upper(), logging.INFO)
     logging.basicConfig(
         level=resolved_level,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        format=(
+            "%(asctime)s %(levelname)s %(name)s "
+            "request_id=%(request_id)s %(message)s"
+        ),
         force=True,
     )
     redacting_filter = RedactingFilter()
     for handler in logging.getLogger().handlers:
         handler.addFilter(redacting_filter)
+        handler.setFormatter(RedactingFormatter(
+            "%(asctime)s %(levelname)s %(name)s "
+            "request_id=%(request_id)s %(message)s"
+        ))

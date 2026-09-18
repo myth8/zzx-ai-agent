@@ -16,7 +16,7 @@ from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool
 from app.llm import llm
-import re
+from app.utils.safe_math import SafeMathError, evaluate_math_expression
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,12 @@ def get_time():
 def calc(expr: str):
     """
     Calculate a math expression.
-    Input: expression string like "2 + 3 * 4" or "sqrt(16)".
+    Input: expression string like "2 + 3 * 4" or "(10 - 2) / 4".
     """
     try:
-        result = eval(expr, {"__builtins__": {}}, {})
-        return str(result)
-    except Exception as e:
-        return f"Error: {e}"
+        return str(evaluate_math_expression(expr))
+    except SafeMathError:
+        return "计算表达式无效，仅支持数字、括号和批准的基础运算符。"
 
 @tool
 def get_now_weather(location: str) -> dict:
@@ -145,14 +144,6 @@ def make_agent(system_prompt, context=""):
         max_execution_time=90,# 最大执行时间（秒）:90，超时则强制停止
     )
 
-def extract_thought(log_text: str) -> str:
-    """从 LLM 输出日志中提取 Thought 内容"""
-    match = re.search(r"Thought:\s*(.*?)(?=\nAction:|\nFinal Answer:|$)", log_text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return log_text.strip()  # 保底
-
-
 def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
     """
     Synchronous agent streaming with real-time thinking log.
@@ -182,10 +173,8 @@ def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
         steps = step.get("steps", [])
         for action in actions:
             if getattr(action, "tool", None):
-                # 提取 Thought 内容
-                thought_text = extract_thought(action.log) if hasattr(action, 'log') else ""
-                if thought_text:
-                    yield f"[THINK] 思考:{thought_text}"
+                # 不向浏览器暴露模型原始 Thought，只输出产品可控的阶段状态。
+                yield "[THINK] 正在分析问题并选择合适的工具。"
                 logger.info(
                     "Agent tool started session=%s tool=%s",
                     session_id or "-",
@@ -195,8 +184,8 @@ def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
             obs = s.observation.strip() if s.observation else ""
             if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
                 tool_name = getattr(s.action, 'tool', '?') if hasattr(s, 'action') and s.action else '?'
-                tool_in = getattr(s.action, 'tool_input', '') if hasattr(s, 'action') and s.action else ''
-                yield f"[STEP] 工具: {tool_name} 输入: {tool_in} 结果: {obs[:300]}"
+                # 工具输入和原始结果可能包含用户隐私或第三方响应，不直接下发。
+                yield f"[STEP] 工具 {tool_name} 执行完成。"
         if "output" in step:
             answer = step["output"]
             final_answer = answer

@@ -82,7 +82,10 @@ const sendMessage = (message) => {
     }
   }
   eventSource.onerror = (error) => {
-    console.error('SSE Error:', error)
+    const requestHint = error.requestId ? `（请求编号：${error.requestId}）` : ''
+    if (aiMessageIndex < messages.value.length) {
+      messages.value[aiMessageIndex].content = `${error.message || '生成失败，请稍后重试'}${requestHint}`
+    }
     connectionStatus.value = 'error'
     eventSource.close()
   }

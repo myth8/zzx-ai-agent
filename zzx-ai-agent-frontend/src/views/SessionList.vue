@@ -40,7 +40,7 @@
               <span class="rename-hint">编辑</span>
             </div>
             <div v-else class="rename-input-wrap">
-              <input ref="renameInput" v-model="editValue" class="rename-input" @keyup.enter="saveRename(s.session_id)" @keyup.escape="cancelRename" @blur="saveRename(s.session_id)" @click.stop>
+              <input ref="renameInput" v-model="editValue" class="rename-input" maxlength="100" @keyup.enter="saveRename(s.session_id)" @keyup.escape="cancelRename" @blur="saveRename(s.session_id)" @click.stop>
             </div>
             <div class="session-card-time">最近更新 · {{ formatTime(s.updated_at) }}</div>
           </div>

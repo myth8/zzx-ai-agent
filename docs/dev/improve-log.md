@@ -366,3 +366,49 @@ WHERE username = '需要设为管理员的账号';
 - RAG 定向测试 4 项全部通过。
 - 后端完整测试共 16 项执行成功，其中 12 项因当前环境未运行 Redis 而按测试设计跳过。
 - Python 编译检查与 Git diff 格式检查通过。
+
+## 2026-09-17：阶段 0.3 与 0.4 限流、生产启动和安全 CI
+
+### Redis 差异化限流
+
+- 引入 Flask-Limiter，并将限流状态统一保存到现有 Redis；多个线程和后续多个 Web 进程共享同一套计数，不依赖单进程内存。
+- 注册按来源 IP 限制为默认每小时 5 次；登录同时应用来源 IP 每分钟 20 次、单账号每分钟 5 次两层限制。
+- 登录账号先执行 NFKC、去空格和小写归一化，再以 SHA-256 摘要作为 Redis key，避免在运维数据中暴露明文用户名。
+- 两个聊天入口共享按用户计数的每分钟 12 次额度，避免切换 Chain 与 Agent 绕开限制。
+- RAG 管理读取默认每分钟 120 次；邀请码兑换、上传、删除和重建共享每分钟 6 次管理员写额度，避免通过轮换操作类型绕开限制或高频尝试提升权限。
+- 超限统一返回 HTTP 429 和 `RATE_LIMIT_EXCEEDED`，响应携带限流头与 `request_id`。Redis 不可用时不静默放行。
+- 新增 `TRUST_PROXY_HOPS`。默认不信任 `X-Forwarded-For`；仅当服务确实位于固定层数的可信反向代理后方时开启，防止伪造来源 IP。
+
+#### 限流内部实现补充
+
+- `rate_limit.py` 负责定义规则，不自行实现计数器；路由包装、规则解析、超限异常由 Flask-Limiter 完成，底层 `limits` Redis Storage 维护固定窗口。
+- Redis 整体是 K-V 数据库，但当前限流 Value 的 Redis 数据类型是 String，不是 Hash。计数值例如 `3` 就保存在该 Key 对应的 String Value 中，TTL 由 Redis 为 Key 单独维护。
+- 一条记录由项目前缀、身份键、共享 scope、额度和时间单位组成，例如 `LIMITS:LIMITER/zzx:ratelimit/user:9/admin-write/6/1/minute`。
+- String 计数器可以使用 Redis 原子递增；小整数在 Redis 内部可能采用 `int` 编码，但 `TYPE key` 仍返回 `string`。内部编码与 Redis 对外数据类型不能混为一谈。
+- 实际隔离演示中，“每分钟最多 2 次”的前三次请求分别得到计数 1、2、3，第三次返回 429。被拒绝请求仍计数，窗口 TTL 到期后整个 Key 自动删除。
+- 使用独立 String Key 而不是一个大 Hash，使不同用户和不同 scope 可以拥有各自 TTL。Redis Hash 的普通 Field 不能直接分别设置过期时间。
+- 聊天和管理限流装饰器放在登录/管理员装饰器内层，确保 `request.current_user` 已生成后再按 user_id 计数；登录接口则先经过 IP 层，再经过账号摘要层。
+- 超限响应包含 `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset` 和 `Retry-After`，后续前端可增加倒计时提示。
+
+### Gunicorn 生产基线
+
+- 新增 `wsgi.py` 与 `gunicorn.conf.py`，生产启动命令为 `gunicorn -c gunicorn.conf.py wsgi:app`。
+- 使用 `gthread`、默认 1 Worker 和 4 Threads，使普通请求与 SSE 能并发处理，同时只保留一份进程内 RAG 索引、Embedding 与 Reranker 状态。
+- 增加超时、优雅退出、Keep-Alive、标准输出日志以及包含响应 `X-Request-ID` 的访问日志格式。
+- `run.py` 在 `APP_ENV=production` 时直接拒绝启动 Flask 开发服务器，防止误部署。
+- Worker 暂不默认增加到多个；在完成 Redis 分布式重建锁、持久化 active index version 与跨进程索引切换前，多 Worker 会造成 RAG 状态不一致。
+
+### 安全回归与 CI
+
+- 后端完整回归扩展为 36 项并全部通过，实际连接测试 Redis 验证计数、共享 scope、按用户隔离和统一 429 响应。
+- 新增 JWT 过期、错误签名、错误 audience、两个 SSE 未登录拒绝、用户 A 无法读取/重命名/删除用户 B 会话等测试。
+- 新增 RAG 危险 MIME 与超大文件拒绝测试；继续覆盖 AST 表达式白名单、输入长度、日志脱敏、SSE 稳定错误和索引一致性。
+- 前端新增 Vitest 与 jsdom，6 项 Markdown 安全测试覆盖安全链接、新窗口隔离、危险协议、实体混淆、相对地址及原始 HTML 转义。
+- 新增 GitHub Actions 安全工作流：Redis 服务就绪后运行后端测试与编译检查，校验 Gunicorn 配置；前端运行测试、生产构建和生产依赖审计。
+
+### 文档交付
+
+- 新增 `docs/summary/Redis差异化限流与生产运行基线.md`，作为代码阅读和运维排查参考。
+- 新增阶段 0.3 博客，记录输入边界、AST 白名单、Markdown 清洗、Redis 差异化限流、SSE 稳定错误和安全响应头。
+- 新增阶段 0.4 博客，记录 Gunicorn 选型、单 Worker 边界、request_id、统一错误、CORS、代理信任、CI 和测试矩阵。
+- 博客流程图继续使用普通 `text` 代码块，不使用 Mermaid，保持掘金兼容性。

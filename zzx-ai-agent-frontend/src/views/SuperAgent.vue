@@ -82,7 +82,8 @@ const sendMessage = (message) => {
     else if (data.startsWith('[FINAL]')) addMessage(data.slice(7).trim(), false, 'ai-final')
   }
   eventSource.onerror = (error) => {
-    console.error('SSE Error:', error)
+    const requestHint = error.requestId ? `（请求编号：${error.requestId}）` : ''
+    addMessage(`${error.message || '生成失败，请稍后重试'}${requestHint}`, false, 'ai-final')
     connectionStatus.value = 'error'
     eventSource.close()
   }

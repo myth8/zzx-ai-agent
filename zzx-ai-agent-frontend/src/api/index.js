@@ -206,12 +206,27 @@ export const connectSSE = (url, params, onMessage, onError) => {
   }
 
   const dispatchEventBlock = block => {
+    const eventType = block
+      .split('\n')
+      .find(line => line.startsWith('event:'))
+      ?.slice(6).trim() || 'message'
     const data = block
       .split('\n')
       .filter(line => line.startsWith('data:'))
       .map(line => line.slice(5).replace(/^ /, ''))
       .join('\n')
-    if (data && connection.onmessage) connection.onmessage({ data })
+    if (!data) return
+    if (eventType === 'error') {
+      let payload = {}
+      try { payload = JSON.parse(data) } catch { payload = {} }
+      const streamError = new Error(payload.message || '生成失败，请稍后重试')
+      streamError.code = payload.code
+      streamError.requestId = payload.request_id
+      streamError.details = payload.details
+      if (connection.onerror) connection.onerror(streamError)
+      return
+    }
+    if (connection.onmessage) connection.onmessage({ data })
   }
 
   const openStream = async token => {
@@ -235,7 +250,12 @@ export const connectSSE = (url, params, onMessage, onError) => {
         response = await openStream(token)
       }
       if (!response.ok || !response.body) {
-        throw new Error('SSE request failed with status ' + response.status)
+        let payload = {}
+        try { payload = await response.json() } catch { payload = {} }
+        const requestError = new Error(payload.message || '请求失败，请稍后重试')
+        requestError.code = payload.code
+        requestError.requestId = payload.request_id
+        throw requestError
       }
 
       const reader = response.body.getReader()
@@ -260,7 +280,13 @@ export const connectSSE = (url, params, onMessage, onError) => {
       if (buffer.trim()) dispatchEventBlock(buffer)
     } catch (error) {
       if (error.name !== 'AbortError' && connection.onerror) {
-        connection.onerror(error)
+        if (error.code || error.requestId) {
+          connection.onerror(error)
+        } else {
+          const safeError = new Error('网络连接失败，请稍后重试')
+          safeError.code = 'NETWORK_ERROR'
+          connection.onerror(safeError)
+        }
       }
     }
   })

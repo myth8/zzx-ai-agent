@@ -35,6 +35,12 @@ from langchain_community.retrievers import BM25Retriever
 from rank_bm25 import BM25Okapi
 import yaml
 
+from app.utils.validation import (
+    DOCUMENT_FRONT_MATTER_MAX_CHARS,
+    InputValidationError,
+    validate_document_metadata,
+)
+
 # ==============================
 #  路径与常量配置
 # ==============================
@@ -88,9 +94,13 @@ def parse_markdown_document(text: str) -> Tuple[dict, str]:
     if match is None:
         return {}, normalized
 
-    metadata = yaml.safe_load(match.group("yaml")) or {}
-    if not isinstance(metadata, dict):
-        raise ValueError("Markdown Front Matter 必须是键值对象")
+    yaml_text = match.group("yaml")
+    if len(yaml_text) > DOCUMENT_FRONT_MATTER_MAX_CHARS:
+        raise InputValidationError(
+            "RAG_METADATA_TOO_LARGE", "Markdown Front Matter 内容过长", "metadata"
+        )
+    metadata = yaml.safe_load(yaml_text) or {}
+    validate_document_metadata(metadata)
     metadata = {
         str(key): _json_metadata_value(value)
         for key, value in metadata.items()

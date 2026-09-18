@@ -17,6 +17,9 @@ from app.llm.agent import stream_agent, get_time, calc, get_now_weather
 from app.llm.rag import rag_search
 from app.llm import llm
 from app.utils.sse import sse_response
+from app.utils.responses import api_error
+from app.utils.rate_limit import chat_rate_limit
+from app.utils.validation import InputValidationError, validate_chat_message
 
 manus_bp = Blueprint("manus", __name__)
 
@@ -28,20 +31,21 @@ SYSTEM_PROMPT = (
 
 @manus_bp.route("/api/ai/manus/chat")
 @login_required
+@chat_rate_limit
 def chat():
-    message = request.args.get("message", "")
+    try:
+        message = validate_chat_message(request.args.get("message", ""))
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 400, exc.details)
     session_id = request.args.get("session_id", "")
     user_id = request.current_user["user_id"]
-
-    if not message:
-        return {"error": "message is required"}, 400
 
     context = ""
     if session_id:
         from app.chat_history import build_context, save_message
         session = get_user_session(user_id, session_id)
         if session is None or session["chat_type"] != "agent":
-            return {"code": 404, "msg": "会话不存在"}, 404
+            return api_error("SESSION_NOT_FOUND", "会话不存在", 404)
         context = build_context(user_id, session_id)
         save_message(user_id, session_id, "user", message)
 

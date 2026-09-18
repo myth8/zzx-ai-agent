@@ -330,7 +330,7 @@ function apiError(error, fallback) {
     router.replace('/')
     return '当前账号没有管理员权限'
   }
-  return error.response?.data?.msg || fallback
+  return error.response?.data?.message || fallback
 }
 
 async function loadDocuments(preferredId = selectedId.value) {

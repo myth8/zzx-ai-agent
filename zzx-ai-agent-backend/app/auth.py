@@ -27,6 +27,20 @@ from app.auth_store import (
     rotate_refresh_token,
 )
 from app.extensions import jwt
+from app.utils.responses import api_error
+from app.utils.rate_limit import (
+    admin_write_rate_limit,
+    login_account_rate_limit,
+    login_ip_rate_limit,
+    register_rate_limit,
+)
+from app.utils.validation import (
+    InputValidationError,
+    validate_invite_code,
+    validate_nickname,
+    validate_password,
+    validate_username,
+)
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -34,11 +48,11 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 def auth_error(message, status, error_code):
     """Return one stable JSON shape for authentication/authorization errors."""
-    return jsonify({
-        "code": status,
-        "msg": message,
-        "error_code": error_code,
-    }), status
+    return api_error(error_code, message, status)
+
+
+def _validation_error(exc):
+    return api_error(exc.code, exc.message, 400, exc.details)
 
 
 def _is_admin_invite_valid(invite_code):
@@ -219,19 +233,18 @@ def needs_fresh_token(_jwt_header, _jwt_payload):
 
 
 @auth_bp.route("/register", methods=["POST"])
+@register_rate_limit
 def register():
-    data = request.get_json(force=True) or {}
-    username = (data.get("username") or "").strip()
-    nickname = (data.get("nickname") or "").strip()
-    password = (data.get("password") or "").strip()
-    invite_code = str(data.get("invite_code") or "").strip()
-
-    if not username or not nickname or not password:
-        return jsonify({"code": 400, "msg": "账号、昵称、密码不能为空"}), 400
-    if len(username) < 3 or len(username) > 50:
-        return jsonify({"code": 400, "msg": "账号长度为 3-50 个字符"}), 400
-    if len(password) < 6:
-        return jsonify({"code": 400, "msg": "密码长度至少 6 位"}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON_BODY_REQUIRED", "请求体必须是 JSON 对象", 400)
+    try:
+        username = validate_username(data.get("username"))
+        nickname = validate_nickname(data.get("nickname"))
+        password = validate_password(data.get("password"), registration=True)
+        invite_code = validate_invite_code(data.get("invite_code"))
+    except InputValidationError as exc:
+        return _validation_error(exc)
     if invite_code and not _is_admin_invite_valid(invite_code):
         return auth_error("管理员邀请码无效", 400, "AUTH_INVITE_INVALID")
 
@@ -242,7 +255,7 @@ def register():
         with conn.cursor() as cur:
             cur.execute("SELECT id FROM users WHERE username=%s", (username,))
             if cur.fetchone():
-                return jsonify({"code": 409, "msg": "该账号已被注册"}), 409
+                return api_error("USERNAME_ALREADY_EXISTS", "该账号已被注册", 409)
 
             hashed = generate_password_hash(password)
             cur.execute(
@@ -263,6 +276,7 @@ def register():
 
 @auth_bp.route("/invite/redeem", methods=["POST"])
 @login_required
+@admin_write_rate_limit
 def redeem_admin_invite():
     """Promote the current user after validating the configured invite."""
     if request.current_user["role"] == "admin":
@@ -272,10 +286,13 @@ def redeem_admin_invite():
             "data": {"role": "admin", "changed": False},
         })
 
-    data = request.get_json(silent=True) or {}
-    invite_code = str(data.get("invite_code") or "").strip()
-    if not invite_code:
-        return auth_error("请输入管理员邀请码", 400, "AUTH_INVITE_REQUIRED")
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON_BODY_REQUIRED", "请求体必须是 JSON 对象", 400)
+    try:
+        invite_code = validate_invite_code(data.get("invite_code"), required=True)
+    except InputValidationError as exc:
+        return _validation_error(exc)
     if not _is_admin_invite_valid(invite_code):
         return auth_error("管理员邀请码无效", 400, "AUTH_INVITE_INVALID")
 
@@ -300,13 +317,18 @@ def redeem_admin_invite():
 
 
 @auth_bp.route("/login", methods=["POST"])
+@login_ip_rate_limit
+@login_account_rate_limit
 def login():
-    data = request.get_json(force=True) or {}
-    username = (data.get("username") or "").strip()
-    password = (data.get("password") or "").strip()
-
-    if not username or not password:
-        return jsonify({"code": 400, "msg": "账号和密码不能为空"}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON_BODY_REQUIRED", "请求体必须是 JSON 对象", 400)
+    try:
+        username = validate_username(data.get("username"))
+        password = validate_password(data.get("password"))
+    except InputValidationError:
+        # 登录接口统一返回模糊提示，避免借格式差异枚举账号。
+        return auth_error("账号或密码错误", 401, "AUTH_INVALID_CREDENTIALS")
 
     conn = get_db()
     try:
@@ -325,12 +347,11 @@ def login():
 
     try:
         return _token_response(user)
-    except AuthStoreUnavailable as exc:
-        return jsonify({
-            "code": 503,
-            "msg": str(exc),
-            "error_code": "AUTH_STORE_UNAVAILABLE",
-        }), 503
+    except AuthStoreUnavailable:
+        current_app.logger.exception("Authentication store unavailable during login")
+        return api_error(
+            "AUTH_STORE_UNAVAILABLE", "登录服务暂时不可用，请稍后重试", 503
+        )
 
 
 @auth_bp.route("/refresh", methods=["POST"])
@@ -365,12 +386,11 @@ def refresh():
             new_jti=new_refresh_payload["jti"],
             expires_at=new_refresh_payload["exp"],
         )
-    except AuthStoreUnavailable as exc:
-        return jsonify({
-            "code": 503,
-            "msg": str(exc),
-            "error_code": "AUTH_STORE_UNAVAILABLE",
-        }), 503
+    except AuthStoreUnavailable:
+        current_app.logger.exception("Authentication store unavailable during refresh")
+        return api_error(
+            "AUTH_STORE_UNAVAILABLE", "登录服务暂时不可用，请稍后重试", 503
+        )
 
     if not rotated:
         return auth_error("刷新凭据已失效", 401, "AUTH_REFRESH_REUSED")
@@ -399,12 +419,11 @@ def logout():
     try:
         revoke_token(token["jti"], token["exp"])
         revoke_login_session(user_id, token.get("sid", ""))
-    except AuthStoreUnavailable as exc:
-        return jsonify({
-            "code": 503,
-            "msg": str(exc),
-            "error_code": "AUTH_STORE_UNAVAILABLE",
-        }), 503
+    except AuthStoreUnavailable:
+        current_app.logger.exception("Authentication store unavailable during logout")
+        return api_error(
+            "AUTH_STORE_UNAVAILABLE", "退出服务暂时不可用，请稍后重试", 503
+        )
 
     response = jsonify({"code": 0, "msg": "退出成功"})
     unset_jwt_cookies(response)
@@ -417,12 +436,11 @@ def logout_all():
     user_id = request.current_user["user_id"]
     try:
         count = revoke_all_login_sessions(user_id)
-    except AuthStoreUnavailable as exc:
-        return jsonify({
-            "code": 503,
-            "msg": str(exc),
-            "error_code": "AUTH_STORE_UNAVAILABLE",
-        }), 503
+    except AuthStoreUnavailable:
+        current_app.logger.exception("Authentication store unavailable during logout-all")
+        return api_error(
+            "AUTH_STORE_UNAVAILABLE", "退出服务暂时不可用，请稍后重试", 503
+        )
 
     response = jsonify({
         "code": 0,

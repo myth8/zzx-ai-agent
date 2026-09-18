@@ -105,6 +105,23 @@ class BaseConfig:
     REDIS_CONNECT_TIMEOUT = _env_int("REDIS_CONNECT_TIMEOUT", 2)
     REDIS_SOCKET_TIMEOUT = _env_int("REDIS_SOCKET_TIMEOUT", 2)
 
+    # Redis-backed, cross-process API rate limits. Limit strings use the
+    # Flask-Limiter syntax and can be tuned per deployment without code edits.
+    RATELIMIT_STORAGE_URI = REDIS_URL
+    RATELIMIT_KEY_PREFIX = _env("RATELIMIT_KEY_PREFIX", "zzx:ratelimit")
+    RATELIMIT_STRATEGY = "fixed-window"
+    RATELIMIT_HEADERS_ENABLED = True
+    RATELIMIT_SWALLOW_ERRORS = False
+    REGISTER_RATE_LIMIT = _env("REGISTER_RATE_LIMIT", "5 per hour")
+    LOGIN_IP_RATE_LIMIT = _env("LOGIN_IP_RATE_LIMIT", "20 per minute")
+    LOGIN_ACCOUNT_RATE_LIMIT = _env("LOGIN_ACCOUNT_RATE_LIMIT", "5 per minute")
+    CHAT_RATE_LIMIT = _env("CHAT_RATE_LIMIT", "12 per minute")
+    ADMIN_READ_RATE_LIMIT = _env("ADMIN_READ_RATE_LIMIT", "120 per minute")
+    ADMIN_WRITE_RATE_LIMIT = _env("ADMIN_WRITE_RATE_LIMIT", "6 per minute")
+
+    # Only enable this when Flask is behind exactly this many trusted proxies.
+    TRUST_PROXY_HOPS = _env_int("TRUST_PROXY_HOPS", 0)
+
     # RAG document and vector index storage
     RAG_DOCUMENTS_DIR = _env_path("RAG_DOCUMENTS_DIR", "documents")
     RAG_CHROMA_DIR = _env_path("RAG_CHROMA_DIR", "chroma_db")
@@ -144,6 +161,8 @@ class BaseConfig:
             raise RuntimeError(
                 "MAX_REQUEST_SIZE_MB must not be smaller than RAG_MAX_FILE_SIZE_MB"
             )
+        if cls.TRUST_PROXY_HOPS < 0:
+            raise RuntimeError("TRUST_PROXY_HOPS must not be negative")
 
         if cls.APP_ENV == "production":
             unsafe_markers = ("change-me", "replace-with", "example", "test-only")
@@ -181,6 +200,7 @@ class TestConfig(BaseConfig):
     JWT_SECRET_KEY = JWT_SECRET
     ADMIN_INVITE_CODE = _env("ADMIN_INVITE_CODE", "test-only-admin-invite")
     REDIS_URL = _env("REDIS_URL", "redis://127.0.0.1:6379/15")
+    RATELIMIT_STORAGE_URI = REDIS_URL
 
 
 class ProductionConfig(BaseConfig):

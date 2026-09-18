@@ -124,6 +124,7 @@
             id="home-invite-code"
             v-model="inviteCode"
             type="password"
+            maxlength="256"
             placeholder="请输入管理员邀请码"
             autocomplete="off"
             autofocus
@@ -192,7 +193,7 @@ async function handleRedeemInvite() {
     inviteCode.value = ''
     inviteSuccess.value = res.msg || '管理员权限已激活'
   } catch (error) {
-    inviteError.value = error.response?.data?.msg || '邀请码验证失败，请稍后重试'
+    inviteError.value = error.response?.data?.message || '邀请码验证失败，请稍后重试'
   } finally {
     inviteLoading.value = false
   }

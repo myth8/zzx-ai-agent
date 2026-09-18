@@ -192,6 +192,7 @@ class RagAdminRouteTest(unittest.TestCase):
             JWT_COOKIE_CSRF_PROTECT=True,
             REDIS_URL=os.getenv("TEST_REDIS_URL", "redis://127.0.0.1:6379/15"),
             REDIS_AUTH_PREFIX=self.prefix,
+            RATELIMIT_KEY_PREFIX="zzx:test:ratelimit",
             REDIS_CONNECT_TIMEOUT=1,
             REDIS_SOCKET_TIMEOUT=1,
             RAG_DOCUMENTS_DIR=self.temp_dir.name,
@@ -202,7 +203,13 @@ class RagAdminRouteTest(unittest.TestCase):
         self.app.register_blueprint(rag_admin_bp)
         try:
             with self.app.app_context():
-                get_redis().ping()
+                redis_client = get_redis()
+                redis_client.ping()
+                keys = list(redis_client.scan_iter(
+                    match="LIMITS:LIMITER/zzx:test:ratelimit/*"
+                ))
+                if keys:
+                    redis_client.delete(*keys)
         except RedisError as exc:
             self.temp_dir.cleanup()
             self.skipTest(f"Redis is not available: {exc}")
@@ -222,6 +229,9 @@ class RagAdminRouteTest(unittest.TestCase):
             with self.app.app_context():
                 redis_client = get_redis()
                 keys = list(redis_client.scan_iter(match=f"{self.prefix}:*"))
+                keys.extend(redis_client.scan_iter(
+                    match="LIMITS:LIMITER/zzx:test:ratelimit/*"
+                ))
                 if keys:
                     redis_client.delete(*keys)
         except (RedisError, AttributeError):
@@ -254,7 +264,7 @@ class RagAdminRouteTest(unittest.TestCase):
                 "/api/admin/rag/documents", headers=self.headers()
             )
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.get_json()["error_code"], "AUTH_ADMIN_REQUIRED")
+        self.assertEqual(response.get_json()["code"], "AUTH_ADMIN_REQUIRED")
 
     def test_chunk_details_are_read_from_relational_chunk_table(self):
         chunk = {
@@ -368,7 +378,36 @@ class RagAdminRouteTest(unittest.TestCase):
                 content_type="multipart/form-data",
             )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()["error_code"], "RAG_FILE_INVALID")
+        self.assertEqual(response.get_json()["code"], "RAG_FILE_INVALID")
+
+    def test_admin_upload_rejects_unsafe_mime_type(self):
+        with patch("app.auth.get_user_by_id", return_value=self.admin):
+            response = self.client.post(
+                "/api/admin/rag/documents",
+                headers=self.headers(),
+                data={
+                    "file": (
+                        io.BytesIO(b"<script>alert(1)</script>"),
+                        "guide.md",
+                        "text/html",
+                    )
+                },
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.get_json()["code"], "RAG_FILE_MIME_INVALID")
+
+    def test_admin_upload_rejects_file_over_configured_limit(self):
+        self.app.config["RAG_MAX_FILE_SIZE_BYTES"] = 8
+        with patch("app.auth.get_user_by_id", return_value=self.admin):
+            response = self.client.post(
+                "/api/admin/rag/documents",
+                headers=self.headers(),
+                data={"file": (io.BytesIO(b"# title\ncontent"), "large.md")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json()["code"], "RAG_FILE_TOO_LARGE")
 
     def test_failed_rebuild_rolls_back_uploaded_file(self):
         with (

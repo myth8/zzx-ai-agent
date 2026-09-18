@@ -2,11 +2,15 @@
 import os
 import threading
 import uuid
+import yaml
 
 from flask import Blueprint, current_app, jsonify, request
 from pymysql.err import IntegrityError
 
 from app.auth import admin_required
+from app.utils.responses import api_error
+from app.utils.rate_limit import admin_read_rate_limit, admin_write_rate_limit
+from app.utils.validation import InputValidationError, validate_markdown_mime_type
 from app.rag_documents import (
     create_document,
     delete_document_record,
@@ -32,11 +36,7 @@ def _ok(data=None, message="操作成功", status=200):
 
 
 def _error(message, status, error_code):
-    return jsonify({
-        "code": status,
-        "msg": message,
-        "error_code": error_code,
-    }), status
+    return api_error(error_code, message, status)
 
 
 def _serialize_document(row):
@@ -99,6 +99,7 @@ def _index_status():
 
 @rag_admin_bp.get("/documents")
 @admin_required
+@admin_read_rate_limit
 def documents():
     rows = [_serialize_document(row) for row in list_documents()]
     return _ok({
@@ -110,12 +111,14 @@ def documents():
 
 @rag_admin_bp.get("/index-status")
 @admin_required
+@admin_read_rate_limit
 def index_status():
     return _ok(_index_status())
 
 
 @rag_admin_bp.get("/documents/<int:document_id>")
 @admin_required
+@admin_read_rate_limit
 def document_detail(document_id):
     row = get_document(document_id)
     if row is None:
@@ -135,6 +138,7 @@ def document_detail(document_id):
 
 @rag_admin_bp.get("/documents/<int:document_id>/chunks")
 @admin_required
+@admin_read_rate_limit
 def document_chunks(document_id):
     row = get_document(document_id)
     if row is None:
@@ -145,10 +149,15 @@ def document_chunks(document_id):
 
 @rag_admin_bp.post("/documents")
 @admin_required
+@admin_write_rate_limit
 def upload_document():
     uploaded = request.files.get("file")
     if uploaded is None or not uploaded.filename:
         return _error("请选择要上传的 Markdown 文件", 400, "RAG_FILE_REQUIRED")
+    try:
+        validate_markdown_mime_type(uploaded.mimetype)
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 415, exc.details)
     try:
         filename = normalize_markdown_filename(uploaded.filename)
     except ValueError as exc:
@@ -169,11 +178,20 @@ def upload_document():
 
         _, body = parse_markdown_document(text_content)
         chunks = split_markdown_text(text_content, filename)
-    except Exception as exc:
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 400, exc.details)
+    except (ValueError, yaml.YAMLError):
         return _error(
-            f"Markdown 元数据格式无效：{exc}",
+            "Markdown 元数据格式无效",
             400,
             "RAG_METADATA_INVALID",
+        )
+    except Exception:
+        current_app.logger.exception("Unexpected Markdown validation failure")
+        return _error(
+            "Markdown 文档无法解析",
+            400,
+            "RAG_DOCUMENT_INVALID",
         )
     if not body.strip() or not chunks:
         return _error("Markdown 文档必须包含正文", 400, "RAG_BODY_EMPTY")
@@ -227,6 +245,7 @@ def upload_document():
 
 @rag_admin_bp.delete("/documents/<int:document_id>")
 @admin_required
+@admin_write_rate_limit
 def delete_document(document_id):
     row = get_document(document_id)
     if row is None:
@@ -259,6 +278,7 @@ def delete_document(document_id):
 
 @rag_admin_bp.post("/rebuild")
 @admin_required
+@admin_write_rate_limit
 def rebuild_index():
     """仅在四层一致性检查发现变化时执行手动全量重建。"""
     with _mutation_lock:

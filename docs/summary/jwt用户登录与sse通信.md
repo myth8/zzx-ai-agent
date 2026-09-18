@@ -1,685 +1,253 @@
-﻿# JWT 用户登录与 SSE 通信
+# JWT 用户登录、Redis 会话与 SSE 通信
 
-> 本文档详细阐述 ZZX-AI 超级智能体中的用户认证体系与实时通信机制：JWT（JSON Web Token）用户登录认证和 SSE（Server-Sent Events）服务端事件流通信。分别从概念、作用、实现思路、实现效果四个维度展开，并在最后分析两者的协作关系。
+本文档描述当前实现。旧版“长期 JWT、原生 EventSource、不校验 SSE Token、仅依靠前端路由守卫”的方案已经废弃。
 
----
+## 一、当前认证结构
 
-## 一、JWT 用户登录
-
-### 1.1 概念
-
-JWT（JSON Web Token）是一种基于 JSON 的开放标准（RFC 7519），用于在各方之间安全地传输信息。在本项目中，JWT 作为**用户身份认证**的核心机制，采用 HS256（HMAC with SHA-256）签名算法，服务端签发 Token，客户端持 Token 访问受保护的 API 资源。
-
-**Token 结构：**
-
-```
-Header:    { "alg": "HS256", "typ": "JWT" }
-Payload:   { "user_id": 1, "username": "zzx", "exp": 1700000000 }
-Signature: HMAC-SHA256(base64UrlEncode(header) + "." + base64UrlEncode(payload), secret)
-```
-
-**认证流程：**
-
-```
-注册/登录 → 服务端验证 → 签发 JWT Token → 客户端存储 → 每次请求携带 → 服务端验证
+```text
+浏览器
+  ├─→ Access Token 保存在 localStorage
+  ├─→ Refresh Token 保存在 HttpOnly Cookie
+  └─→ CSRF Token 保存在浏览器可读 Cookie
+              │
+              ▼
+Flask-JWT-Extended 校验 JWT
+  ├─→ Redis 校验 sid、refresh jti 和吊销记录
+  └─→ MySQL 读取最新用户角色与资源归属
+              │
+              ▼
+普通 API 与 Fetch SSE 使用相同登录校验
 ```
 
-### 1.2 作用
+职责边界：
 
-JWT 用户登录体系在项目中承担以下职责：
+| 组件 | 职责 |
+|---|---|
+| JWT | 携带身份、有效期、issuer、audience、jti 和 sid |
+| Redis | 保存登录会话、Refresh 当前 jti、吊销状态和限流计数 |
+| MySQL | 保存用户、密码哈希、role、会话、消息和资源归属 |
+| 前端 | 携带 Access Token、在过期时调用刷新接口、读取 SSE |
 
-- **用户身份认证**：确保只有注册用户才能访问对话服务与会话管理 API
-- **无状态鉴权**：服务端无需存储 session，Token 自身包含完整的用户身份信息
-- **跨端兼容**：Token 可同时在 Web 前端和未来可能的移动端使用
-- **安全防护**：密码经过 Werkzeug 哈希存储，Token 通过 Bearer 方案传输
+这不是完全无状态 JWT。JWT 负责凭证表达，Redis 让登录可以被立即吊销，MySQL 提供最新权限真相。
 
-### 1.3 实现思路
+## 二、Access Token 与 Refresh Token
 
-#### 1.3.1 配置层
+### Access Token
 
-JWT 密钥和数据库连接信息通过环境变量注入，并在 `app/config.py` 中集中读取：
+- 默认有效期 30 分钟。
+- 通过 `Authorization: Bearer <token>` 调用普通 API 和 SSE。
+- 过期、签名错误、issuer 或 audience 不匹配都会被拒绝。
+- 携带唯一 `jti` 和本次设备登录的 `sid`。
 
-```python
-# app/config.py
-class BaseConfig:
-    MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
-    MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-    MYSQL_USER = os.getenv("MYSQL_USER", "")
-    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-    MYSQL_DB = os.getenv("MYSQL_DB", "zzx_agent_db")
-    JWT_SECRET = os.getenv("JWT_SECRET", "")
+### Refresh Token
+
+- 默认有效期 14 天。
+- 保存于 HttpOnly Cookie，JavaScript 无法直接读取 Token 正文。
+- 只能用于刷新接口，不能直接调用业务接口。
+- 刷新时原子轮换 jti，旧 Refresh Token 不能重复使用。
+- 刷新请求还需要 CSRF Cookie 和 `X-CSRF-TOKEN` 请求头。
+
+可以类比为：
+
+```text
+Access Token：短期门票
+Refresh Token：续票凭证
+jti：每张票的唯一编号
+sid：本次设备登录编号
 ```
 
-**参数说明：**
+## 三、登录流程
 
-| 参数 | 值 | 说明 |
-| :--- | :--- | :--- |
-| `JWT_SECRET` | 由环境变量提供 | Token 签名密钥，必须使用随机高强度值 |
-| Token 有效期 | 7 天（86400 × 7 秒） | 在 `make_token` 中通过 `exp` 字段设定 |
-| 签名算法 | HS256 | PyJWT 库支持的对称签名算法 |
-
-#### 1.3.2 数据库模型
-
-用户信息存储在 MySQL `users` 表中：
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    username   VARCHAR(50)  NOT NULL UNIQUE,
-    nickname   VARCHAR(50)  NOT NULL,
-    password   VARCHAR(255) NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+```text
+提交用户名和密码
+      │
+      ▼
+登录 IP 限流
+      │
+      ▼
+登录账号摘要限流
+      │
+      ▼
+MySQL 查询用户并校验密码哈希
+      │
+      ▼
+生成 sid、Access Token 和 Refresh Token
+      │
+      ▼
+Redis 保存登录会话与 Refresh jti
+      │
+      ▼
+返回 Access Token，并设置 Refresh Cookie
 ```
 
-- `username`：唯一索引，用作登录凭证
-- `nickname`：显示昵称
-- `password`：Werkzeug 哈希密文，非明文
+登录使用双层限流：同一来源 IP 默认每分钟 20 次，同一归一化账号默认每分钟 5 次。
 
-#### 1.3.3 核心工具函数
+账号先进行 NFKC、去空格和小写归一化，再计算 SHA-256 摘要作为 Redis 限流身份，避免 Redis Key 暴露明文用户名。
 
-**获取数据库连接：**
+## 四、普通请求鉴权
 
-```python
-# app/auth.py
-def get_db():
-    cfg = current_app.config
-    return pymysql.connect(
-        host=cfg.get("MYSQL_HOST", "127.0.0.1"),
-        port=cfg.get("MYSQL_PORT", 3306),
-        user=cfg["MYSQL_USER"],
-        password=cfg["MYSQL_PASSWORD"],
-        database=cfg.get("MYSQL_DB", "zzx_agent_db"),
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-    )
+```text
+读取 Authorization
+      │
+      ▼
+校验 JWT 签名、类型、时间、issuer 和 audience
+      │
+      ▼
+检查 jti 与 sid 是否被 Redis 吊销
+      │
+      ▼
+从 MySQL 加载最新用户
+      │
+      ▼
+设置 request.current_user
+      │
+      ▼
+业务接口按 user_id 校验资源归属
 ```
 
-- 使用 `pymysql` 直连 MySQL，返回字典游标方便访问字段名
-- 配置从 Flask `current_app.config` 中读取，与环境变量兼容
+管理员接口继续从 MySQL 读取最新 role，不信任前端缓存，也不把 JWT 中的旧角色作为最终授权依据。
 
-**签发 Token：**
+会话查询、消息查询、重命名和删除都使用 `user_id + session_id` 联合条件。知道另一个用户的 session_id 也不能访问对应资源。
 
-```python
-# app/auth.py
-def make_token(user_id, username):
-    import jwt as pyjwt
-    secret = current_app.config["JWT_SECRET"]
-    payload = {
-        "user_id":  user_id,
-        "username": username,
-        "exp":      int(time.time()) + 86400 * 7,  # 7 days
-    }
-    return pyjwt.encode(payload, secret, algorithm="HS256")
-```
+## 五、SSE 为什么改用 Fetch
 
-- Payload 包含 `user_id`、`username` 和 `exp`（过期时间）
-- 使用 HS256 算法签名
-- 过期时间设为 7 天，平衡安全性与用户体验
+浏览器原生 `EventSource` 不能方便地设置自定义 Authorization 请求头。旧方案只依靠前端页面守卫，攻击者仍然可以绕过页面直接请求 SSE URL，因此不能作为后端安全边界。
 
-**验证 Token：**
-
-```python
-# app/auth.py
-def decode_token(token):
-    import jwt as pyjwt
-    secret = current_app.config["JWT_SECRET"]
-    try:
-        return pyjwt.decode(token, secret, algorithms=["HS256"])
-    except Exception:
-        return None
-```
-
-- 解码失败（过期、签名错误、格式非法）时返回 `None`
-- 使用 `try/except` 兜底所有异常类型
-
-#### 1.3.4 认证装饰器
-
-`@login_required` 装饰器保护需要登录的 API 路由：
-
-```python
-# app/auth.py
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            return jsonify({"code": 401, "msg": "未登录或 Token 已过期"}), 401
-        token = auth[7:]
-        payload = decode_token(token)
-        if payload is None:
-            return jsonify({"code": 401, "msg": "Token 无效或已过期"}), 401
-        request.current_user = payload
-        return f(*args, **kwargs)
-    return decorated
-```
-
-**验证流程：**
-
-1. 从 `Authorization` 请求头提取 Bearer Token
-2. 检查是否以 `"Bearer "` 开头，否则直接返回 401
-3. 截取 Token 部分（去掉 "Bearer " 前缀）
-4. 调用 `decode_token` 解码，失败则返回 401
-5. 解码成功则将用户信息注入 `request.current_user`
-6. 执行被装饰的路由函数
-
-#### 1.3.5 API 接口
-
-**注册接口 `POST /api/auth/register`：**
-
-```python
-@auth_bp.route("/register", methods=["POST"])
-def register():
-    data = request.get_json(force=True) or {}
-    username = (data.get("username") or "").strip()
-    nickname = (data.get("nickname") or "").strip()
-    password = (data.get("password") or "").strip()
-```
-
-**输入校验规则：**
-
-| 字段 | 规则 |
-| :--- | :--- |
-| username | 必填，3-50 个字符，唯一 |
-| nickname | 必填，不可为空 |
-| password | 必填，至少 6 位 |
-
-**业务逻辑：**
-
-1. 校验输入参数
-2. 检查用户名是否已注册（`SELECT id FROM users WHERE username=%s`）
-3. 对密码进行 Werkzeug 哈希：`generate_password_hash(password)`
-4. 插入用户记录
-5. 返回成功响应
-
-**登录接口 `POST /api/auth/login`：**
-
-```python
-@auth_bp.route("/login", methods=["POST"])
-def login():
-    # 查询用户
-    cur.execute("SELECT id, username, nickname, password FROM users WHERE username=%s", (username,))
-    row = cur.fetchone()
-    # 验证密码
-    if row is None or not check_password_hash(row["password"], password):
-        return jsonify({"code": 401, "msg": "账号或密码错误"}), 401
-    # 签发 Token
-    token = make_token(row["id"], row["username"])
-```
-
-**登录响应格式：**
-
-```json
-{
-    "code": 0,
-    "msg": "登录成功",
-    "data": {
-        "token": "eyJhbGciOiJIUzI1NiIs...",
-        "user_id": 1,
-        "username": "zzx",
-        "nickname": "ZZX"
-    }
-}
-```
-
-- `token`：JWT Token 字符串
-- `user_id`：用户数字 ID
-- `username`：登录用户名
-- `nickname`：显示昵称
-
-**其他接口：**
-
-| 接口 | 方法 | 认证 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `/api/auth/verify` | GET | @login_required | 验证 Token 有效性 |
-| `/api/auth/userinfo` | GET | @login_required | 获取当前用户完整信息 |
-
-#### 1.3.6 前端集成
-
-**API 请求层**（`src/api/index.js`）：
+当前前端改用 Fetch 读取流：
 
 ```javascript
-// Axios 请求拦截器 - 自动附加 Bearer Token
-request.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = 'Bearer ' + token
+fetch(url, {
+  headers: {
+    Authorization: `Bearer ${accessToken}`
   }
-  return config
 })
 ```
 
-- 每次请求前从 `localStorage` 读取 token
-- 自动附加到 HTTP Header 的 `Authorization` 字段
-- 对 SSE 连接无效（SSE 的 EventSource 不支持自定义请求头）
+两个 SSE 入口都使用 `login_required`，再使用 `chat_rate_limit`：
 
-**路由守卫**（`src/router/index.js`）：
-
-```javascript
-router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  if (!publicRoutes.includes(to.name)) {
-    if (!token) {
-      return next({ name: 'Login', query: { redirect: to.fullPath } })
-    }
-  } else {
-    if (token) {
-      return next({ name: 'Home' })
-    }
-  }
-  next()
-})
+```text
+Fetch 建立流式请求
+      │
+      ▼
+校验 Access Token 与 Redis 登录状态
+      │
+      ▼
+加载最新用户并设置 current_user
+      │
+      ▼
+按 user_id 检查聊天限流
+      │
+      ▼
+校验 session_id 是否属于当前用户
+      │
+      ▼
+生成并返回 SSE 内容
 ```
 
-**守卫逻辑：**
+恋爱大师与超级智能体共享默认每分钟 12 次的用户级聊天额度。
 
-| 当前状态 | 目标路由 | 行为 |
-| :--- | :--- | :--- |
-| 未登录 | 公开页面（Login/Register） | 正常访问 |
-| 未登录 | 受保护页面 | 跳转到 Login，附带 redirect 参数 |
-| 已登录 | 公开页面（Login/Register） | 跳转到 Home |
-| 已登录 | 受保护页面 | 正常访问 |
+## 六、SSE 数据与稳定错误
 
-**退出登录：**
+正常流程：
 
-```javascript
-// src/views/Home.vue
-function handleLogout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
-  router.push('/login')
-}
+```text
+data: [THINKING]
+
+data: 第一段内容
+
+data: 第二段内容
+
+data: [DONE]
 ```
 
-- 清除 `localStorage` 中的 token 和用户信息
-- 跳转到登录页
-- 路由守卫自动拦截后续对受保护页面的访问
+异常发生时，连接通常已经开始返回 HTTP 200，无法再稳定切换成普通 JSON 500。因此后端发送稳定的 `event: error`，内容只包含 `CHAT_STREAM_FAILED`、安全提示、request_id 和空 details。
 
-### 1.4 实现效果
+客户端不会收到 Python 堆栈、数据库错误、工具参数或原始异常文本。服务端日志保留脱敏后的详细堆栈，并使用同一个 request_id 关联。
 
-- **注册/登录流程完整闭环**：从用户注册、密码哈希存储、Token 签发、前端持久化到 API 鉴权，形成完整的认证链路
-- **双重安全机制**：密码通过 Werkzeug 的 `generate_password_hash`（基于 pbkdf2:sha256）存储，Token 通过 HS256 签名防篡改
-- **无状态扩展性**：后端不做 session 存储，Token 自包含用户身份信息，方便横向扩展
-- **路由级保护**：前端路由守卫 + 后端 @login_required 装饰器双重保护
-- **友好的用户体验**：登录成功后自动跳回原始页面（redirect 参数），退出登录无需确认
+## 七、自动刷新流程
 
----
-
-## 二、SSE 通信
-
-### 2.1 概念
-
-SSE（Server-Sent Events）是一种基于 HTTP 的**服务端推送**技术，允许服务端通过单一的 HTTP 长连接持续向客户端发送数据。与 WebSocket 不同，SSE 是**单向**的（仅服务端 → 客户端），但天然基于 HTTP 协议，无需额外的握手开销。
-
-**协议格式：**
-
-```
-data: [THINKING]\n\n
-data: 当前温度25℃\n
-data: 适合户外活动\n\n
-data: [DONE]\n\n
+```text
+业务请求返回 Access Token 过期
+      │
+      ▼
+前端读取 CSRF Cookie
+      │
+      ▼
+携带 Refresh HttpOnly Cookie 和 X-CSRF-TOKEN
+      │
+      ▼
+Redis 原子校验并轮换 Refresh jti
+  ├─→ 失败：清理登录状态并要求重新登录
+  └─→ 成功：返回新 Access Token 和 Refresh Cookie
+                     │
+                     ▼
+              重试原业务请求
 ```
 
-每条消息以 `data:` 开头，以 `\n\n` 结尾，可以跨多行。
+刷新不是为了让 Access Token 无限有效，而是将“短期业务凭证”和“长期登录体验”分开。用户也可以选择不用 Refresh Token，直接设置较长 Access Token 并在过期后重新登录，但代价是泄露后的可利用时间更长、主动吊销更依赖服务端状态。
 
-### 2.2 作用
+## 八、退出与吊销
 
-SSE 通信在项目中承担以下职责：
+退出当前设备时：
 
-- **实时流式输出**：LLM 的 Token 级输出实时推送到前端，用户无需等待完整回答即可阅读中间结果
-- **Agent 过程透明**：Agent 的思考过程（`[THINK]`）、工具调用步骤（`[STEP]`）和最终答案（`[FINAL]`）分阶段推送
-- **心跳保活**：连接建立后立即发送 `[THINKING]` 心跳信号，防止前端因未收到数据而超时关闭连接
-- **前后端分离通信**：Flask 后端通过 SSE StreamingResponse 输出，Vue 前端通过原生 EventSource 接收，不依赖 WebSocket 等额外库
+1. 当前 Access Token jti 写入吊销记录。
+2. 当前 sid 登录会话失效。
+3. 从用户会话集合移除该 sid。
+4. 清除 Refresh Cookie。
 
-### 2.3 实现思路
+退出所有设备时，当前用户的所有 sid 都会失效。后续请求即使携带尚未自然过期的 Access Token，也会因为 Redis 状态失效而被拒绝。
 
-#### 2.3.1 后端 SSE 工具函数
+## 九、限流与 Redis 数据结构
 
-**`sse_response` 函数**（`app/utils/sse.py`）：
+认证状态和限流状态共用 Redis 服务，但使用不同前缀和数据结构语义。
 
-```python
-def sse_response(generator_fn, *args):
-    """
-    Convert a streaming generator into a Flask SSE StreamingResponse.
-    """
-    def generate():
-        try:
-            # Immediate heartbeat → prevents frontend timeout
-            yield "data: [THINKING]\n\n"
-            for chunk in generator_fn(*args):
-                # SSE: multi-line data needs multiple "data:" lines
-                for line in chunk.split("\n"):
-                    yield f"data: {line}\n"
-                yield "\n"
-        except Exception as e:
-            yield f"data: Error: {e}\n\n"
-        yield "data: [DONE]\n\n"
+固定窗口限流记录是：
 
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+```text
+Redis Key → String 计数值，并附带 Key TTL
 ```
 
-**实现逻辑：**
+例如：
 
-| 阶段 | 输出 | 作用 |
-| :--- | :--- | :--- |
-| 连接建立 | `data: [THINKING]\n\n` | 心跳信号，防止前端 EventSource 超时重连 |
-| 流式数据 | `data: {chunk}`（逐行拆分） | 将生成器产生的每块文本按换行符拆分为多条 SSE 消息 |
-| 异常处理 | `data: Error: {e}\n\n` | 捕获生成器内的异常并推送 |
-| 流结束 | `data: [DONE]\n\n` | 通知前端关闭连接 |
-
-**响应头说明：**
-
-| 头字段 | 值 | 作用 |
-| :--- | :--- | :--- |
-| `Content-Type` | text/event-stream | SSE 标准 MIME 类型 |
-| `Cache-Control` | no-cache | 禁止代理和浏览器缓存 |
-| `Connection` | keep-alive | 保持长连接 |
-| `X-Accel-Buffering` | no | 禁用 Nginx 等反向代理的缓冲，确保实时性 |
-
-#### 2.3.2 Agent 模式流的 SSE 事件
-
-在 **AI 超级智能体**（Agent 模式）中，`stream_agent` 产生三类事件：
-
-| SSE 前缀 | 触发时机 | 示例 |
-| :--- | :--- | :--- |
-| `[THINK]` | Agent 每次推理时，提取 Thought 内容 | `data: [THINK] 用户想知道当前时间` |
-| `[STEP]` | 工具调用完成后，包含工具名和结果 | `data: [STEP] 工具: get_time 结果: 2026-07-22 10:00` |
-| `[FINAL]` | Agent 输出最终答案 | `data: [FINAL] 当前北京时间是......` |
-
-**具体实现**（`app/llm/agent.py` 中的 `stream_agent`）：
-
-```python
-for step in executor.stream({"input": message}):
-    actions = step.get("actions", [])
-    steps = step.get("steps", [])
-    for action in actions:
-        if getattr(action, "tool", None):
-            thought_text = extract_thought(action.log) if hasattr(action, 'log') else ""
-            if thought_text:
-                yield f"[THINK] 思考: {thought_text}"  # 思考过程
-                print(f"  |- Thought: {thought_text}")
-            yield f"[STEP] 工具: {action.tool}"          # 工具调用
-    for s in steps:
-        obs = s.observation.strip() if s.observation else ""
-        if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
-            yield f"[STEP] 工具: {tool_name} 结果: {obs[:300]}"  # 工具结果
-    if "output" in step:
-        answer = step["output"]
-        yield f"[FINAL] {answer}"                       # 最终答案
+```text
+LIMITS:LIMITER/zzx:ratelimit/user:9/chat-stream/12/1/minute → 5
 ```
 
-#### 2.3.3 Chain 模式流的 SSE 事件
+Redis 是 K-V 数据库，但这里的 Value 类型是 String，不是 Redis Hash。计数通过原子递增更新，TTL 到期后 Key 自动删除。
 
-在 **AI 恋爱大师**（Chain 模式）中，`stream_chain` 的事件更加简单：
+完整说明见 `docs/summary/Redis差异化限流与生产运行基线.md`。
 
-```python
-for chunk in chain.stream(invoke_input):
-    if chunk:
-        yield chunk  # 直接输出 Token 块
+## 十、安全存储说明
+
+当前 Access Token 仍保存在 localStorage，以兼容现有前端架构。阶段 0.3 已增加 Markdown-It、DOMPurify、危险 URL 协议白名单和 CSP，显著降低模型输出导致的 XSS 风险。
+
+但 localStorage 仍可被同源 JavaScript 读取，所以后续可以进一步评估：
+
+- Access Token 仅保存在内存。
+- 页面刷新时通过 Refresh Cookie 恢复 Access Token。
+- 更严格 CSP，逐步去除 `unsafe-inline`。
+- 依赖供应链与第三方脚本控制。
+
+## 十一、回归测试
+
+当前相关测试覆盖：
+
+- Token 缺失、过期、错误签名和错误 audience。
+- Redis 登录会话、Refresh 轮换和吊销。
+- 管理员读取 MySQL 最新角色。
+- 两个 SSE 接口未登录拒绝。
+- 用户 A 无法访问用户 B 会话。
+- 登录 IP、账号摘要和聊天限流。
+- SSE 稳定错误与 request_id。
+- 日志正文及 traceback 脱敏。
+
+## 十二、结论
+
+```text
+JWT 负责证明“请求携带了什么身份凭证”
+Redis 负责判断“这次登录和 Token 现在是否仍然有效”
+MySQL 负责判断“用户当前拥有什么权限和资源”
+Fetch SSE 负责“在同一认证边界下传输流式内容”
 ```
 
-Chain 模式的 SSE 没有 `[THINK]` / `[STEP]` / `[FINAL]` 前缀，因为 Chain 不需要工具调用，直接输出 LLM 生成的文本流。
-
-#### 2.3.4 路由集成
-
-**Agent 路由：**
-
-```python
-# app/routes/manus.py
-@manus_bp.route("/api/ai/manus/chat")
-def chat():
-    executor = create_agent(prompt, middleware=[...], extra_tools=[...])
-    return sse_response(stream_agent, executor, message, session_id, llm)
-```
-
-**Chain 路由：**
-
-```python
-# app/routes/love_app.py
-@love_bp.route("/api/ai/love_app/chat/sse")
-def chat():
-    chain = make_chain(SYSTEM_PROMPT, context)
-    return sse_response(stream_chain, chain, message, context, session_id, llm)
-```
-
-**CORS 支持：**
-
-```python
-# app/__init__.py
-@app.after_request
-def add_cors(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
-```
-
-SSE 连接在 fetch/EventSource 层面受 CORS 限制，服务端通过全局 `after_request` 中间件开放跨域访问。
-
-#### 2.3.5 前端 SSE 客户端
-
-**通用 SSE 连接函数**（`src/api/index.js`）：
-
-```javascript
-export const connectSSE = (url, params, onMessage, onError) => {
-  // 构建查询字符串
-  const queryString = Object.keys(params)
-    .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
-    .join('&')
-
-  const fullUrl = API_BASE_URL + url + '?' + queryString
-
-  const eventSource = new EventSource(fullUrl)
-
-  eventSource.onmessage = event => {
-    let data = event.data
-    if (data === '[DONE]') {
-      if (onMessage) onMessage('[DONE]')
-    } else {
-      if (onMessage) onMessage(data)
-    }
-  }
-
-  eventSource.onerror = error => {
-    if (onError) onError(error)
-    eventSource.close()
-  }
-
-  return eventSource
-}
-```
-
-**API 封装：**
-
-```javascript
-// AI 恋爱大师 SSE
-export const chatWithLoveApp = (message, sessionId) => {
-  const params = { message }
-  if (sessionId) params.session_id = sessionId
-  return connectSSE('/ai/love_app/chat/sse', params)
-}
-
-// AI 超级智能体 SSE
-export const chatWithManus = (message, sessionId) => {
-  const params = { message }
-  if (sessionId) params.session_id = sessionId
-  return connectSSE('/ai/manus/chat', params)
-}
-```
-
-#### 2.3.6 前端 Agent 事件消费
-
-在 **SuperAgent.vue** 中，SSE 事件按照类型分别消费：
-
-```javascript
-const sendMessage = (message) => {
-  addMessage(message, true, 'user-question')
-
-  if (eventSource) {
-    eventSource.close()   // 关闭已有连接
-  }
-
-  connectionStatus.value = 'connecting'
-  eventSource = chatWithManus(message, sessionId.value)
-
-  eventSource.onmessage = (event) => {
-    const data = event.data
-    if (data === '[THINKING]') return          // 忽略心跳
-    if (data === '[DONE]') {                    // 流结束
-      connectionStatus.value = 'disconnected'
-      eventSource.close()
-      return
-    }
-    if (!data) return
-
-    if (data.startsWith('[THINK]')) {
-      addMessage(data.slice(7).trim(), false, 'ai-think')       // 思考标签
-    } else if (data.startsWith('[STEP]')) {
-      addMessage(data.slice(6).trim(), false, 'ai-step')        // 步骤标签
-    } else if (data.startsWith('[FINAL]')) {
-      addMessage(data.slice(7).trim(), false, 'ai-final')       // 最终答案
-    }
-  }
-
-  eventSource.onerror = (error) => {
-    console.error('SSE Error:', error)
-    connectionStatus.value = 'error'
-    eventSource.close()
-  }
-}
-```
-
-在 **LoveMaster.vue** 中，Chain 模式的 SSE 消费更加简单：
-
-```javascript
-const sendMessage = (message) => {
-  addMessage(message, true)
-  connectionStatus.value = 'connecting'
-  eventSource = chatWithLoveApp(message, sessionId.value)
-
-  eventSource.onmessage = (event) => {
-    const data = event.data
-    if (data === '[DONE]') {
-      connectionStatus.value = 'disconnected'
-      eventSource.close()
-    }
-    if (!data || data === '[THINKING]') return
-    // 直接附加到最后一条消息（continuous 标记）
-  }
-}
-```
-
-#### 2.3.7 完整数据流
-
-**Agent 模式完整数据流：**
-
-```
-用户点击发送
-  │
-  ├── 前端：addMessage(userText, true)          → 立即显示用户消息
-  ├── 前端：eventSource = new EventSource(url)  → 建立 SSE 连接
-  │
-  ├── 后端：sse_response()                      → 立即发送心跳 [THINKING]
-  ├── 后端：stream_agent()                      → Agent 开始推理
-  │     ├── [THINK] 思考内容                    → 前端显示思考气泡
-  │     ├── [STEP] 工具调用 + 结果              → 前端显示工具步骤
-  │     ├── [THINK] 继续推理...
-  │     └── [FINAL] 最终答案                    → 前端显示 AI 回复
-  │
-  ├── 后端：保存消息到 MySQL                    → 持久化对话记录
-  ├── 后端：触发摘要更新                        → 长对话压缩
-  │
-  └── 前端：收到 [DONE]                         → 关闭连接
-```
-
-**Chain 模式完整数据流：**
-
-```
-用户点击发送
-  │
-  ├── 前端：addMessage(userText, true)          → 立即显示用户消息
-  ├── 前端：eventSource = new EventSource(url)  → 建立 SSE 连接
-  │
-  ├── 后端：sse_response()                      → 立即发送心跳 [THINKING]
-  ├── 后端：stream_chain()                      → LLM 逐 token 流式输出
-  │     └── 直接输出文本块                      → 前端实时渲染
-  │
-  ├── 后端：保存消息到 MySQL                    → 持久化对话记录
-  ├── 后端：触发摘要更新                        → 长对话压缩
-  │
-  └── 前端：收到 [DONE]                         → 关闭连接
-```
-
-### 2.4 实现效果
-
-- **零额外依赖**：不依赖 WebSocket、Socket.IO 等库，前后端均使用原生 API（后端 `stream_with_context`，前端 `EventSource`）
-- **实时体验**：首 token 延迟在 1-2 秒内，用户可逐字阅读 AI 回复
-- **过程透明**：Agent 模式中，用户可以看到 AI 的思考过程和工具调用步骤，增强可解释性和信任感
-- **自动重连**：前端 EventSource 在连接意外断开时自动重试（浏览器原生行为）
-- **连接管理**：每次发送新消息前关闭旧连接，避免多条消息堆积
-
----
-
-## 三、JWT 与 SSE 的关系
-
-### 3.1 分工
-
-| 维度 | JWT 用户登录 | SSE 通信 |
-| :--- | :--- | :--- |
-| **职责** | 身份认证与权限控制 | 实时数据传输 |
-| **方向** | 双向请求-响应 | 服务端→客户端单向推送 |
-| **协议** | HTTP Restful API | HTTP SSE (text/event-stream) |
-| **状态** | 无状态（Token 自包含） | 有状态（长连接） |
-| **生命周期** | 每次请求独立验证 | 单次对话持续存在 |
-
-### 3.2 协作
-
-JWT 和 SSE 在项目中**各司其职**，共同构成完整的用户交互链路：
-
-```
-用户 → [JWT 登录] → 获取 Token → [SSE 对话] → AI 回复
-                  ↓                                      ↓
-          会话管理 API（受 @login_required 保护）     流式输出（无需额外认证）
-```
-
-- **对话之前**：用户必须通过 JWT 登录系统，获取 Token 后才能访问对话页面
-- **对话之中**：SSE 连接不携带 Token（EventSource 不支持自定义请求头），但对话页面本身已受路由守卫保护，未登录用户无法进入
-- **对话之后**：会话 CRUD 接口（创建、重命名、删除）通过 Axios 拦截器自动附加 JWT Token，受 `@login_required` 装饰器保护
-
-### 3.3 对比
-
-| 对比项 | JWT 认证 | SSE 通信 |
-| :--- | :--- | :--- |
-| **模式** | 请求-响应 | 推送 |
-| **传输层** | HTTP (JSON) | HTTP (text/event-stream) |
-| **认证方式** | Bearer Token | 页面级路由守卫 |
-| **状态管理** | 无状态 | 长连接 |
-| **超时处理** | Token 7 天过期 | 流结束后自动关闭 |
-| **安全性** | 加密签名 + 密码哈希 | 不直接对外暴露 |
-| **前端实现** | Axios 拦截器 | 原生 EventSource |
-
-### 3.4 关键设计决策
-
-1. **SSE 不走 JWT 认证**：原生 `EventSource` API 不支持自定义请求头，无法直接传递 `Authorization: Bearer <token>`。解决方案是利用 Vue Router 的路由守卫——未登录用户根本进不了对话页面，天然保证了 SSE 连接发起者一定是已登录用户。
-
-2. **Token 存储在 localStorage**：简单且符合单页应用模式。不受 SSR 影响，在页面刷新后仍然可用。
-
-3. **SSE 优于 WebSocket 的选择**：项目只需要服务端→客户端的单向实时推送（AI 回复流），不需要双向（客户端不需要通过长连接向服务端发消息），SSE 是更轻量、更符合语义的选择。如果未来需要双向实时交互，可考虑升级为 WebSocket。
-
----
-
-## 四、总结
-
-| 概念 | 一句话总结 |
-| :--- | :--- |
-| **JWT 用户登录** | 通过 HS256 签名 Token 实现无状态身份认证，覆盖注册、登录、鉴权、登出完整链路 |
-| **SSE 通信** | 基于原生 HTTP 的服务端推送协议，实现 LLM Token 级流式输出和 Agent 过程透明化 |
-| **两者协作** | JWT 负责"进门安检"，SSE 负责"对话流畅"——页面守卫保证安全，SSE 保证实时 |
+前端路由守卫只改善用户体验，真正的认证、资源归属和限流全部由后端执行。

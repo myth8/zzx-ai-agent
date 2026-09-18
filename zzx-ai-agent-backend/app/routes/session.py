@@ -5,6 +5,12 @@
 """
 from flask import Blueprint, request, jsonify
 from app.auth import login_required
+from app.utils.responses import api_error
+from app.utils.validation import (
+    InputValidationError,
+    validate_chat_type,
+    validate_session_title,
+)
 from app.chat_history import (
     create_session,
     get_user_sessions,
@@ -21,7 +27,10 @@ session_bp = Blueprint("session", __name__, url_prefix="/api/session")
 def list_sessions():
     """获取当前用户的所有会话列表"""
     user_id = request.current_user["user_id"]
-    chat_type = request.args.get("chat_type", "chain")
+    try:
+        chat_type = validate_chat_type(request.args.get("chat_type", "chain"))
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 400, exc.details)
     rows = get_user_sessions(user_id, chat_type)
     return jsonify({
         "code": 0,
@@ -43,9 +52,14 @@ def list_sessions():
 def new_session():
     """创建新会话"""
     user_id = request.current_user["user_id"]
-    data = request.get_json(force=True) or {}
-    chat_type = data.get("chat_type", "chain")
-    title = data.get("title", None)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON_BODY_REQUIRED", "请求体必须是 JSON 对象", 400)
+    try:
+        chat_type = validate_chat_type(data.get("chat_type", "chain"))
+        title = validate_session_title(data.get("title"), default="新对话")
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 400, exc.details)
     session_id = create_session(user_id, chat_type, title)
     return jsonify({"code": 0, "msg": "创建成功", "data": {"session_id": session_id}}), 201
 
@@ -54,14 +68,21 @@ def new_session():
 @login_required
 def rename():
     """重命名会话"""
-    data = request.get_json(force=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON_BODY_REQUIRED", "请求体必须是 JSON 对象", 400)
     session_id = data.get("session_id", "")
-    title = data.get("title", "").strip()
-    if not session_id or not title:
-        return jsonify({"code": 400, "msg": "参数不完整"}), 400
+    if not isinstance(session_id, str) or not session_id.strip():
+        return api_error(
+            "SESSION_ID_REQUIRED", "会话 ID 不能为空", 400, {"field": "session_id"}
+        )
+    try:
+        title = validate_session_title(data.get("title"))
+    except InputValidationError as exc:
+        return api_error(exc.code, exc.message, 400, exc.details)
     user_id = request.current_user["user_id"]
     if not rename_session(user_id, session_id, title):
-        return jsonify({"code": 404, "msg": "会话不存在"}), 404
+        return api_error("SESSION_NOT_FOUND", "会话不存在", 404)
     return jsonify({"code": 0, "msg": "更新成功"})
 
 
@@ -71,7 +92,7 @@ def remove(session_id):
     """删除指定会话"""
     user_id = request.current_user["user_id"]
     if not delete_session(user_id, session_id):
-        return jsonify({"code": 404, "msg": "会话不存在"}), 404
+        return api_error("SESSION_NOT_FOUND", "会话不存在", 404)
     return jsonify({"code": 0, "msg": "删除成功"})
 
 
@@ -82,7 +103,7 @@ def messages(session_id):
     user_id = request.current_user["user_id"]
     from app.chat_history import get_user_session
     if get_user_session(user_id, session_id) is None:
-        return jsonify({"code": 404, "msg": "会话不存在"}), 404
+        return api_error("SESSION_NOT_FOUND", "会话不存在", 404)
     rows = get_session_messages(user_id, session_id)
     return jsonify({
         "code": 0,

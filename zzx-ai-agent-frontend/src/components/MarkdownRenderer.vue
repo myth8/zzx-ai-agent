@@ -4,120 +4,13 @@
 
 <script setup>
 import { computed } from "vue"
+import { renderSafeMarkdown } from "../utils/markdown.js"
 
 const props = defineProps({
   content: { type: String, default: "" }
 })
 
-const html = computed(() => renderMarkdown(props.content || ""))
-
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-}
-
-function inline(text) {
-  let t = text
-  // Inline code (must come first)
-  t = t.replace(/`([^`]+)`/g, "<code>$1</code>")
-  // Bold **text**
-  t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-  // Italic *text*  (but not ** already handled)
-  t = t.replace(/\*(?!\*)(.+?)\*/g, "<em>$1</em>")
-  // Links [text](url)
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-  return t
-}
-
-function renderMarkdown(text) {
-  if (!text) return ""
-  const escaped = escapeHtml(text.trim())
-  const lines = escaped.split("\n")
-
-  const out = []
-  let inList = null      // "ol" | "ul" | null
-  let inCodeBlock = false
-
-  for (let i = 0; i < lines.length; i++) {
-    let raw = lines[i]
-    const trimmed = raw.trim()
-
-    // ---------- code block toggle ----------
-    if (trimmed.startsWith("```")) {
-      if (inCodeBlock) {
-        out.push("</code></pre>")
-        inCodeBlock = false
-      } else {
-        if (inList) { out.push("</" + inList + ">"); inList = null }
-        out.push("<pre><code>")
-        inCodeBlock = true
-      }
-      continue
-    }
-    if (inCodeBlock) {
-      out.push(trimmed + "\n")
-      continue
-    }
-
-    // ---------- empty line ----------
-    if (!trimmed) {
-      if (inList) { out.push("</" + inList + ">"); inList = null }
-      continue
-    }
-
-    // ---------- heading ----------
-    const hMatch = trimmed.match(/^(#{1,3})\s+(.+)/)
-    if (hMatch) {
-      if (inList) { out.push("</" + inList + ">"); inList = null }
-      const level = hMatch[1].length
-      out.push("<h" + (level + 1) + ">" + inline(hMatch[2]) + "</h" + (level + 1) + ">")
-      continue
-    }
-
-    // ---------- horizontal rule ----------
-    if (/^-{3,}$/.test(trimmed)) {
-      if (inList) { out.push("</" + inList + ">"); inList = null }
-      out.push("<hr>")
-      continue
-    }
-
-    // ---------- ordered list ----------
-    const olMatch = trimmed.match(/^(\d+)\.\s+(.*)/)
-    if (olMatch) {
-      if (inList !== "ol") {
-        if (inList) out.push("</" + inList + ">")
-        out.push("<ol>")
-        inList = "ol"
-      }
-      out.push("<li>" + inline(olMatch[2]) + "</li>")
-      continue
-    }
-
-    // ---------- unordered list ----------
-    const ulMatch = trimmed.match(/^[-*+]\s+(.*)/)
-    if (ulMatch) {
-      if (inList !== "ul") {
-        if (inList) out.push("</" + inList + ">")
-        out.push("<ul>")
-        inList = "ul"
-      }
-      out.push("<li>" + inline(ulMatch[1]) + "</li>")
-      continue
-    }
-
-    // ---------- paragraph ----------
-    if (inList) { out.push("</" + inList + ">"); inList = null }
-    out.push("<p>" + inline(raw) + "</p>")
-  }
-
-  if (inCodeBlock) out.push("</code></pre>")
-  if (inList) out.push("</" + inList + ">")
-
-  return out.join("\n")
-}
+const html = computed(() => renderSafeMarkdown(props.content))
 </script>
 
 <style scoped>

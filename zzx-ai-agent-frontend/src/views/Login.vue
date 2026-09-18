@@ -30,7 +30,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4.8 20c.8-4 3.2-6 7.2-6s6.4 2 7.2 6"/></svg>
               </span>
-              <input id="login-username" v-model="form.username" type="text" placeholder="输入你的账号" autocomplete="username">
+              <input id="login-username" v-model="form.username" type="text" maxlength="50" placeholder="输入你的账号" autocomplete="username">
             </div>
           </div>
           <div class="field">
@@ -39,7 +39,7 @@
               <span class="field-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
               </span>
-              <input id="login-password" v-model="form.password" type="password" placeholder="输入你的密码" autocomplete="current-password">
+              <input id="login-password" v-model="form.password" type="password" maxlength="128" placeholder="输入你的密码" autocomplete="current-password">
             </div>
           </div>
           <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
@@ -75,7 +75,7 @@ async function handleLogin() {
   try {
     const res = await login(form.username.trim(), form.password)
     if (res.code !== 0) {
-      errorMsg.value = res.msg || "登录失败"
+      errorMsg.value = res.message || res.msg || "登录失败"
       return
     }
     const { token, access_token: accessToken, ...profile } = res.data
@@ -83,7 +83,7 @@ async function handleLogin() {
     localStorage.setItem("user", JSON.stringify(profile))
     router.push(route.query.redirect || "/")
   } catch (e) {
-    errorMsg.value = e.response?.data?.msg || "网络错误，请稍后重试"
+    errorMsg.value = e.response?.data?.message || "网络错误，请稍后重试"
   } finally {
     loading.value = false
   }

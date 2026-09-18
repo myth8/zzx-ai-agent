@@ -13,6 +13,10 @@ from app import create_app
 app = create_app()
 
 if __name__ == "__main__":
+    if app.config["APP_ENV"] == "production":
+        raise RuntimeError(
+            "Production must use Gunicorn: gunicorn -c gunicorn.conf.py wsgi:app"
+        )
     host = os.getenv("APP_HOST", "127.0.0.1")
     port = int(os.getenv("APP_PORT", "8123"))
     print(f"ZZX-AI API | http://{host}:{port}")
