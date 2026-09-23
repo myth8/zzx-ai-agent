@@ -72,6 +72,14 @@ class BaseConfig:
     MYSQL_USER = _env("MYSQL_USER")
     MYSQL_PASSWORD = _env("MYSQL_PASSWORD")
     MYSQL_DB = _env("MYSQL_DB", "zzx_agent_db")
+    MYSQL_POOL_SIZE = _env_int("MYSQL_POOL_SIZE", 8)
+    MYSQL_MAX_OVERFLOW = _env_int("MYSQL_MAX_OVERFLOW", 4)
+    MYSQL_POOL_TIMEOUT = _env_int("MYSQL_POOL_TIMEOUT", 10)
+    MYSQL_POOL_RECYCLE = _env_int("MYSQL_POOL_RECYCLE", 1800)
+    MYSQL_CONNECT_TIMEOUT = _env_int("MYSQL_CONNECT_TIMEOUT", 5)
+    MYSQL_READ_TIMEOUT = _env_int("MYSQL_READ_TIMEOUT", 30)
+    MYSQL_WRITE_TIMEOUT = _env_int("MYSQL_WRITE_TIMEOUT", 30)
+    MYSQL_SLOW_QUERY_MS = _env_int("MYSQL_SLOW_QUERY_MS", 500)
 
     # JWT
     JWT_SECRET = _env("JWT_SECRET")
@@ -163,6 +171,26 @@ class BaseConfig:
             )
         if cls.TRUST_PROXY_HOPS < 0:
             raise RuntimeError("TRUST_PROXY_HOPS must not be negative")
+        positive_database_settings = (
+            "MYSQL_POOL_SIZE",
+            "MYSQL_POOL_TIMEOUT",
+            "MYSQL_POOL_RECYCLE",
+            "MYSQL_CONNECT_TIMEOUT",
+            "MYSQL_READ_TIMEOUT",
+            "MYSQL_WRITE_TIMEOUT",
+            "MYSQL_SLOW_QUERY_MS",
+        )
+        invalid_database_settings = [
+            name for name in positive_database_settings
+            if getattr(cls, name) <= 0
+        ]
+        if cls.MYSQL_MAX_OVERFLOW < 0:
+            invalid_database_settings.append("MYSQL_MAX_OVERFLOW")
+        if invalid_database_settings:
+            raise RuntimeError(
+                "Database pool/timeouts must be positive: "
+                + ", ".join(invalid_database_settings)
+            )
 
         if cls.APP_ENV == "production":
             unsafe_markers = ("change-me", "replace-with", "example", "test-only")
