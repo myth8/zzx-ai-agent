@@ -30,6 +30,7 @@ bin-release/
 # Runtime logs
 *.log
 logs/
+database-backups/
 
 # Python bytecode
 __pycache__/
