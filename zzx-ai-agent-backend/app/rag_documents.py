@@ -118,76 +118,9 @@ def _replace_document_chunks(cur, document_id, chunks):
 
 
 def init_rag_tables():
-    """
-    创建/兼容迁移 RAG 表，并把 documents 目录同步到数据库。
-
-    CREATE TABLE IF NOT EXISTS 负责全新环境；后续 SHOW COLUMNS + ALTER 负责
-    已有环境的小步兼容迁移。表结构准备完成后再同步文件，保证新环境只需
-    手动创建空数据库，启动应用即可得到文档台账和切片记录。
-    """
-    conn = get_db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS rag_documents (
-                    id           INT AUTO_INCREMENT PRIMARY KEY,
-                    filename     VARCHAR(255) NOT NULL UNIQUE,
-                    display_name VARCHAR(255) NOT NULL,
-                    file_size    BIGINT NOT NULL DEFAULT 0,
-                    sha256       CHAR(64) NOT NULL,
-                    chunk_count  INT NOT NULL DEFAULT 0,
-                    document_metadata JSON DEFAULT NULL,
-                    status       VARCHAR(20) NOT NULL DEFAULT 'ready',
-                    last_error   VARCHAR(500) DEFAULT NULL,
-                    uploaded_by  INT DEFAULT NULL,
-                    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_rag_documents_status (status),
-                    INDEX idx_rag_documents_uploader (uploaded_by)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            # 兼容早期已经存在、但缺少 document_metadata 的数据库。
-            cur.execute("SHOW COLUMNS FROM rag_documents LIKE 'document_metadata'")
-            if cur.fetchone() is None:
-                cur.execute(
-                    "ALTER TABLE rag_documents "
-                    "ADD COLUMN document_metadata JSON DEFAULT NULL AFTER chunk_count"
-                )
-            # Remove the obsolete JSON chunk snapshot introduced by the early MVP.
-            # Relational chunks in rag_document_chunks are now the sole source of truth.
-            cur.execute("SHOW COLUMNS FROM rag_documents LIKE 'chunk_metadata'")
-            if cur.fetchone() is not None:
-                cur.execute(
-                    "ALTER TABLE rag_documents DROP COLUMN chunk_metadata"
-                )
-            # 切片单独成表后，可以建立唯一约束、按文档查询，并通过外键在
-            # 删除文档时自动级联删除，不再维护文档表里的重复 JSON 数组。
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS rag_document_chunks (
-                    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    document_id    INT NOT NULL,
-                    chunk_id       CHAR(24) NOT NULL,
-                    chunk_index    INT NOT NULL,
-                    content        LONGTEXT NOT NULL,
-                    content_sha256 CHAR(64) NOT NULL,
-                    char_count     INT NOT NULL,
-                    section_title  VARCHAR(500) DEFAULT NULL,
-                    metadata       JSON DEFAULT NULL,
-                    vector_id      VARCHAR(255) NOT NULL,
-                    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uk_rag_chunks_chunk_id (chunk_id),
-                    UNIQUE KEY uk_rag_chunks_document_index (document_id, chunk_index),
-                    INDEX idx_rag_chunks_document (document_id),
-                    INDEX idx_rag_chunks_content_sha256 (content_sha256),
-                    CONSTRAINT fk_rag_chunks_document
-                        FOREIGN KEY (document_id) REFERENCES rag_documents(id)
-                        ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-        conn.commit()
-    finally:
-        conn.close()
+    """Deprecated compatibility hook; schema changes are Alembic migrations."""
+    from app.db_schema import verify_database_schema
+    verify_database_schema()
     sync_document_catalog()
 
 

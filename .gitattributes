@@ -1,0 +1,4 @@
+# 只约束脚本文件的换行符，避免 Windows 提交的 CRLF 让 bash 报 "$'\r': command not found"
+# 不加 `* text=auto`，避免整仓文件被重新规范化产生大量无意义 diff
+*.sh  text eol=lf
+*.ps1 text eol=crlf

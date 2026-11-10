@@ -39,15 +39,17 @@ def create_app(config_object=None, initialize_database=True):
     from app.extensions import init_extensions
     init_extensions(app)
 
-    # Initialise database tables on startup
+    from app.db import init_db_engine
+    init_db_engine(app)
+
+    # Schema changes are owned by Alembic. Runtime startup only verifies that
+    # migrations have been applied and performs the non-DDL RAG catalogue sync.
     if initialize_database:
         with app.app_context():
-            from app.auth import init_db
-            from app.chat_history import init_tables as init_chat_tables
-            from app.rag_documents import init_rag_tables
-            init_db()
-            init_chat_tables()
-            init_rag_tables()
+            from app.db_schema import verify_database_schema
+            from app.rag_documents import sync_document_catalog
+            verify_database_schema()
+            sync_document_catalog()
 
     # Credential-aware CORS for the configured frontend origins.
     @app.after_request

@@ -66,50 +66,15 @@ def _is_admin_invite_valid(invite_code):
 
 
 def get_db():
-    """Get a MySQL database connection from validated configuration."""
-    cfg = current_app.config
-    return pymysql.connect(
-        host=cfg["MYSQL_HOST"],
-        port=cfg["MYSQL_PORT"],
-        user=cfg["MYSQL_USER"],
-        password=cfg["MYSQL_PASSWORD"],
-        database=cfg["MYSQL_DB"],
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-    )
+    """Compatibility wrapper returning a pooled DBAPI connection."""
+    from app.db import get_db_connection
+    return get_db_connection()
 
 
 def init_db():
-    """Initialize the user schema, including the lightweight role column."""
-    conn = get_db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id         INT AUTO_INCREMENT PRIMARY KEY,
-                    username   VARCHAR(50)  NOT NULL UNIQUE,
-                    nickname   VARCHAR(50)  NOT NULL,
-                    password   VARCHAR(255) NOT NULL,
-                    role       VARCHAR(32)  NOT NULL DEFAULT 'user',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_users_role (role)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("SHOW COLUMNS FROM users LIKE 'role'")
-            if cur.fetchone() is None:
-                cur.execute(
-                    "ALTER TABLE users "
-                    "ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user' "
-                    "AFTER password"
-                )
-            cur.execute(
-                "SHOW INDEX FROM users WHERE Key_name='idx_users_role'"
-            )
-            if cur.fetchone() is None:
-                cur.execute("CREATE INDEX idx_users_role ON users (role)")
-        conn.commit()
-    finally:
-        conn.close()
+    """Deprecated compatibility hook; run ``alembic upgrade head`` instead."""
+    from app.db_schema import verify_database_schema
+    verify_database_schema()
 
 
 def get_user_by_id(user_id):
@@ -253,16 +218,20 @@ def register():
     conn = get_db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE username=%s", (username,))
-            if cur.fetchone():
-                return api_error("USERNAME_ALREADY_EXISTS", "该账号已被注册", 409)
-
             hashed = generate_password_hash(password)
-            cur.execute(
-                "INSERT INTO users (username, nickname, password, role) "
-                "VALUES (%s, %s, %s, %s)",
-                (username, nickname, hashed, role),
-            )
+            try:
+                cur.execute(
+                    "INSERT INTO users (username, nickname, password, role) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (username, nickname, hashed, role),
+                )
+            except pymysql.err.IntegrityError as exc:
+                conn.rollback()
+                if exc.args and exc.args[0] == 1062:
+                    return api_error(
+                        "USERNAME_ALREADY_EXISTS", "该账号已被注册", 409
+                    )
+                raise
         conn.commit()
     finally:
         conn.close()

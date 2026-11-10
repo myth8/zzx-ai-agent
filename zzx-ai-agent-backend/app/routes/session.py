@@ -109,6 +109,8 @@ def messages(session_id):
         "code": 0,
         "data": [
             {
+                "message_id": r["message_id"],
+                "client_message_id": r["client_message_id"],
                 "role": r["role"],
                 "content": r["content"],
                 "msg_order": r["msg_order"],
