@@ -412,3 +412,44 @@ WHERE username = '需要设为管理员的账号';
 - 新增阶段 0.3 博客，记录输入边界、AST 白名单、Markdown 清洗、Redis 差异化限流、SSE 稳定错误和安全响应头。
 - 新增阶段 0.4 博客，记录 Gunicorn 选型、单 Worker 边界、request_id、统一错误、CORS、代理信任、CI 和测试矩阵。
 - 博客流程图继续使用普通 `text` 代码块，不使用 Mermaid，保持掘金兼容性。
+
+## 2026-09-18：阶段 1.1 至 1.5 数据库、事务与幂等基础
+
+详细设计文档：`docs/summary/阶段1-数据库迁移事务运行记录与幂等设计.md`。
+
+### 本次范围
+
+本轮只落实阶段 1.1 至 1.5，暂不切换新版消息提交、运行查询、事件订阅、取消和分页接口。
+
+### 数据库迁移与历史数据兼容
+
+- 引入 Alembic，新增 legacy baseline 与阶段 1 数据完整性两个版本；应用启动不再执行 `CREATE TABLE`、`ALTER TABLE` 或 `DROP COLUMN`。
+- 新增迁移前只读检查和 `mysqldump` 压缩备份脚本。部署顺序固定为预检、备份、`alembic upgrade head`、启动应用。
+- 旧 8 位 session_id 保持不变，新会话改为完整 UUID，避免破坏已有 URL 和消息关联。
+- 历史消息补齐完整 UUID message_id；新增 session_id + msg_order、session_id + client_message_id 唯一约束。
+- 当前本地库发现 2 个无主会话及 10 条关联消息。迁移已将完整行内容保存到 migration_orphan_records，再从活动表移出后建立外键；迁移前逻辑备份保存在被 Git 忽略的 database-backups 目录。
+- users -> sessions、sessions -> messages/summaries/runs 建立明确外键；删除会话由数据库级联清理关联数据。
+
+### 消息事务与连接池
+
+- sessions 增加 next_message_order 和 version，历史 next_message_order 已按现有最大顺序回填。
+- 消息写入在同一事务中锁定会话行、读取并递增 next_message_order、插入消息并更新 sessions.updated_at；不再执行 MAX(msg_order)+1。
+- 使用 SQLAlchemy Engine 管理 PyMySQL 连接池，并保留 DictCursor 兼容包装；统一 connection/transaction 上下文负责提交、回滚和归还连接。
+- 增加连接建立、读、写、池等待、连接回收和慢查询阈值配置。慢查询只记录 SQL 操作类型与耗时，不记录参数和用户内容。
+
+### chat_runs 与幂等记录
+
+- 新增 chat_runs，覆盖 queued、running、succeeded、failed、cancelled、timed_out，使用 status + version 条件更新阻止过期 Worker 或非法状态回退。
+- 新增 idempotency_records，唯一范围为 user_id + endpoint + idempotency_key，并保存 request_hash、资源、稳定响应和过期时间。
+- 新增原子消息接纳服务：幂等记录、用户消息、消息顺序、会话时间和 chat_run 在同一事务中提交。
+- 相同 key 与相同请求返回原 message_id/run_id；相同 key 对应不同请求抛出幂等冲突，供后续接口映射为 HTTP 409。
+- 对已受幂等键保护的消息接纳事务，仅针对 MySQL 1205/1213 做最多 3 次短退避重试；其他写操作不进行盲目重试。
+- 注册不再依赖“先查询再插入”保证唯一性，数据库唯一约束冲突稳定映射为 USERNAME_ALREADY_EXISTS。
+
+### 验证结果
+
+- 本地数据库升级至 20260918_0002，应用迁移版本检查和连接池启动检查通过。
+- 20 路相同幂等键并发提交只生成 1 条用户消息和 1 个 chat_run。
+- 相同 key 不同内容冲突、消息顺序递增、next_message_order 更新、run 状态与 version 比较交换均通过 MySQL 集成测试。
+- GitHub Actions 后端任务增加 MySQL 8 服务，先升级空库，再运行安全与数据库集成测试。
+- 阶段 1.6 之前，现有 GET SSE 入口仍走旧调用方式；新幂等消息接纳服务尚未暴露为 HTTP 接口，避免在本轮提前改变前端契约。
