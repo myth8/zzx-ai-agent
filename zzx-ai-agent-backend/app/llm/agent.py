@@ -53,13 +53,25 @@ def get_now_weather(location: str) -> dict:
     """
     import asyncio
     from app.llm.mcp_tools import get_mcp_tools
-    mcp_tools = get_mcp_tools()
-    weather_tool = next((t for t in mcp_tools if t.name == "get_weather"), None)
+
+    # 整个调用链都必须在 try 内：MCP 服务不可达时 get_mcp_tools() 会抛出
+    # anyio 的 ExceptionGroup，若放在 try 外会一路冒泡打断整轮对话。
     try:
+        mcp_tools = get_mcp_tools()
+        weather_tool = next((t for t in mcp_tools if t.name == "get_weather"), None)
+        if weather_tool is None:
+            logger.warning("Weather tool unavailable: get_weather not exposed by MCP server")
+            return "未获取到天气数据"
         result = asyncio.run(weather_tool.ainvoke({"location": location}))
         return str(result)
-    except Exception as e:
-        return "未获取到天气数据";
+    except Exception as exc:
+        logger.warning(
+            "Weather tool failed location_chars=%s error=%s: %s",
+            len(location),
+            type(exc).__name__,
+            exc,
+        )
+        return "未获取到天气数据"
 
 
 # ==============================
