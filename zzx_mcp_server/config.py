@@ -28,7 +28,7 @@ if APP_ENV not in {"development", "test", "production"}:
 
 SENIVERSE_API_KEY = _env("SENIVERSE_API_KEY")
 MCP_HOST = _env("MCP_HOST", "127.0.0.1")
-MCP_PORT = int(_env("MCP_PORT", "8000"))
+MCP_PORT = int(_env("MCP_PORT", "19317"))
 MCP_PATH = _env("MCP_PATH", "/mcp")
 LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
 

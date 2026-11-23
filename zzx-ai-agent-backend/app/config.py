@@ -140,7 +140,7 @@ class BaseConfig:
     CORS_ORIGINS = tuple(
         origin.strip()
         for origin in _env(
-            "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+            "CORS_ORIGINS", "http://localhost:17317,http://127.0.0.1:17317"
         ).split(",")
         if origin.strip()
     )

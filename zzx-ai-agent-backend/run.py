@@ -18,7 +18,7 @@ if __name__ == "__main__":
             "Production must use Gunicorn: gunicorn -c gunicorn.conf.py wsgi:app"
         )
     host = os.getenv("APP_HOST", "127.0.0.1")
-    port = int(os.getenv("APP_PORT", "8123"))
+    port = int(os.getenv("APP_PORT", "18317"))
     print(f"ZZX-AI API | http://{host}:{port}")
     app.run(
         host=host,

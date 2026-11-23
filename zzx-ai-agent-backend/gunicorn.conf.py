@@ -24,7 +24,7 @@ def _positive_int(name, default):
     return value
 
 
-bind = f"{os.getenv('APP_HOST', '127.0.0.1')}:{_positive_int('APP_PORT', 8123)}"
+bind = f"{os.getenv('APP_HOST', '127.0.0.1')}:{_positive_int('APP_PORT', 18317)}"
 
 # gthread allows several SSE connections without introducing another process
 # copy of Embedding/Reranker models. Keep one worker until RAG mutation and

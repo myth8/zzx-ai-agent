@@ -1,4 +1,4 @@
-﻿# ZZX-AI 超级智能体
+# ZZX-AI 超级智能体
 
 ## 项目背景
 
@@ -153,7 +153,7 @@ Skills 是一种**渐进式技能模板**机制，允许 Agent 在运行时按�
 **MCP 服务端**（`zzx_mcp_server/server.py`）：
 - 基于 FastMCP 框架，使用 `streamable-http` 传输协议
 - 注册了 `get_weather` 工具，对接心知天气 API 获取实时天气数据
-- 部署在 `http://127.0.0.1:8000/mcp`
+- 部署在 `http://127.0.0.1:19317/mcp`
 
 **MCP 客户端适配**（`app/llm/mcp_tools.py`）：
 - 基于 `langchain-mcp-adapters` 的 `MultiServerMCPClient` 连接 MCP 服务端
