@@ -17,6 +17,7 @@ redis==8.1.0
 langchain-huggingface==0.3.1
 sentence-transformers==6.0.1
 PyYAML==6.0.3
+Jinja2>=3.1,<4.0
 
 # ── RAG ──
 chromadb==1.5.9

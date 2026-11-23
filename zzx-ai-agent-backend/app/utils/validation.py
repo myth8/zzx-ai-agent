@@ -18,7 +18,7 @@ DOCUMENT_METADATA_MAX_ITEMS = 128
 DOCUMENT_METADATA_MAX_DEPTH = 4
 DOCUMENT_FRONT_MATTER_MAX_CHARS = 16 * 1024
 
-ALLOWED_CHAT_TYPES = frozenset({"chain", "agent"})
+ALLOWED_CHAT_TYPES = frozenset({"chain", "agent", "toolcalling", "code"})
 ALLOWED_MARKDOWN_MIME_TYPES = frozenset({
     "text/markdown",
     "text/x-markdown",

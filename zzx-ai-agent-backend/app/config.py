@@ -32,6 +32,14 @@ def _env_int(name, default):
         raise RuntimeError(f"{name} must be an integer") from exc
 
 
+def _env_float(name, default):
+    value = _env(name, str(default))
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number") from exc
+
+
 def _env_path(name, default):
     value = Path(_env(name, str(default))).expanduser()
     if not value.is_absolute():
@@ -65,6 +73,17 @@ class BaseConfig:
         "DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"
     )
     DEEPSEEK_MODEL = _env("DEEPSEEK_MODEL", "deepseek-chat")
+
+    # Hand-written MultiStepAgent engine. Keeping these values configurable
+    # makes it possible to benchmark both engines under the same model.
+    MULTISTEP_MODEL = _env("MULTISTEP_MODEL", DEEPSEEK_MODEL)
+    MULTISTEP_TEMPERATURE = _env_float("MULTISTEP_TEMPERATURE", 0.7)
+    MULTISTEP_MAX_TOKENS = _env_int("MULTISTEP_MAX_TOKENS", 4096)
+    MULTISTEP_TIMEOUT_SECONDS = _env_int("MULTISTEP_TIMEOUT_SECONDS", 120)
+    MULTISTEP_MAX_STEPS = _env_int("MULTISTEP_MAX_STEPS", 15)
+    MULTISTEP_CODE_TIMEOUT_SECONDS = _env_int("MULTISTEP_CODE_TIMEOUT_SECONDS", 30)
+    MULTISTEP_MAX_OUTPUT_CHARS = _env_int("MULTISTEP_MAX_OUTPUT_CHARS", 20000)
+    MULTISTEP_MAX_CODE_CHARS = _env_int("MULTISTEP_MAX_CODE_CHARS", 6000)
 
     # MySQL
     MYSQL_HOST = _env("MYSQL_HOST", "127.0.0.1")
