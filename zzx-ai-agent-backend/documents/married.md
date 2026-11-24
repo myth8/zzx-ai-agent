@@ -1,7 +1,21 @@
 ---
+schema_version: 1
 title: 恋爱常见问题 - 已婚篇
+description: 面向婚姻阶段用户的角色适应、家庭沟通、长期关系与共同成长指南。
 status: 已婚
+relationship_stage: married
 category: 情感解惑
+topics:
+  - 婚姻沟通
+  - 角色适应
+  - 家庭协作
+  - 长期关系
+audience:
+  - 已婚伴侣
+  - 准备进入婚姻的人群
+language: zh-CN
+version: "1.0"
+source_type: curated
 ---
 
 # 已婚篇：当浪漫落地为柴米油盐

@@ -1,4 +1,5 @@
 """Startup entry. python run.py"""
+import os
 import sys
 import ssl
 
@@ -12,5 +13,16 @@ from app import create_app
 app = create_app()
 
 if __name__ == "__main__":
-    print(f"ZZX-AI API |  http://localhost:8123")
-    app.run(host="0.0.0.0", port=8123, debug=True, threaded=True)
+    if app.config["APP_ENV"] == "production":
+        raise RuntimeError(
+            "Production must use Gunicorn: gunicorn -c gunicorn.conf.py wsgi:app"
+        )
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "18317"))
+    print(f"ZZX-AI API | http://{host}:{port}")
+    app.run(
+        host=host,
+        port=port,
+        debug=app.config["DEBUG"],
+        threaded=True,
+    )

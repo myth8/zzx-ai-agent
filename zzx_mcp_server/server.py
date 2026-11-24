@@ -1,11 +1,30 @@
 # mcp_http_server.py
 import httpx
-import os
 import logging
 from fastmcp import FastMCP
+try:
+    from .config import (
+        LOG_LEVEL,
+        MCP_HOST,
+        MCP_PATH,
+        MCP_PORT,
+        SENIVERSE_API_KEY,
+        validate_mcp_config,
+    )
+    from .logging_config import configure_logging
+except ImportError:
+    from config import (
+        LOG_LEVEL,
+        MCP_HOST,
+        MCP_PATH,
+        MCP_PORT,
+        SENIVERSE_API_KEY,
+        validate_mcp_config,
+    )
+    from logging_config import configure_logging
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+configure_logging(LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 # 创建 MCP 实例
@@ -24,10 +43,11 @@ async def get_weather(location: str) -> dict:
    Returns:
        包含实时天气信息的字典，包括温度、天气现象、更新时间等
     """
-    logger.info(f"Weather query: {location}")
+    validate_mcp_config()
+    logger.info("Weather query received location_chars=%s", len(location))
     url = "https://api.seniverse.com/v3/weather/now.json"
     params = {
-        "key": "S6RhdAuuJQduDCSig",          # 建议改为环境变量
+        "key": SENIVERSE_API_KEY,
         "location": location,
         "language": "zh-Hans",
         "unit": "c",
@@ -53,11 +73,12 @@ async def get_weather(location: str) -> dict:
 
 # ---------- 启动服务器 ----------
 if __name__ == "__main__":
+    validate_mcp_config()
     # mcp.run(transport="sse")
     # 关键修改：transport 改为 streamable-http，并显式指定 host/port/路径
     mcp.run(
         transport="streamable-http",
-        host="127.0.0.1",      # 监听地址
-        port=8000,             # 端口
-        path="/mcp"            # MCP 端点路径，客户端需要精确匹配
+        host=MCP_HOST,
+        port=MCP_PORT,
+        path=MCP_PATH
     )

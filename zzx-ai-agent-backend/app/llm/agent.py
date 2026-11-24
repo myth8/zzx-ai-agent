@@ -10,13 +10,15 @@ Data flow:
   Prompt (system + tools + scratchpad) -> ChatOpenAI -> ReAct output parser
   -> tool_execute -> observe -> loop until Final Answer
 """
-import sys
+import logging
 from datetime import datetime
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool
 from app.llm import llm
-import re
+from app.utils.safe_math import SafeMathError, evaluate_math_expression
+
+logger = logging.getLogger(__name__)
 
 @tool
 def get_time():
@@ -28,13 +30,12 @@ def get_time():
 def calc(expr: str):
     """
     Calculate a math expression.
-    Input: expression string like "2 + 3 * 4" or "sqrt(16)".
+    Input: expression string like "2 + 3 * 4" or "(10 - 2) / 4".
     """
     try:
-        result = eval(expr, {"__builtins__": {}}, {})
-        return str(result)
-    except Exception as e:
-        return f"Error: {e}"
+        return str(evaluate_math_expression(expr))
+    except SafeMathError:
+        return "计算表达式无效，仅支持数字、括号和批准的基础运算符。"
 
 @tool
 def get_now_weather(location: str) -> dict:
@@ -52,13 +53,25 @@ def get_now_weather(location: str) -> dict:
     """
     import asyncio
     from app.llm.mcp_tools import get_mcp_tools
-    mcp_tools = get_mcp_tools()
-    weather_tool = next((t for t in mcp_tools if t.name == "get_weather"), None)
+
+    # 整个调用链都必须在 try 内：MCP 服务不可达时 get_mcp_tools() 会抛出
+    # anyio 的 ExceptionGroup，若放在 try 外会一路冒泡打断整轮对话。
     try:
+        mcp_tools = get_mcp_tools()
+        weather_tool = next((t for t in mcp_tools if t.name == "get_weather"), None)
+        if weather_tool is None:
+            logger.warning("Weather tool unavailable: get_weather not exposed by MCP server")
+            return "未获取到天气数据"
         result = asyncio.run(weather_tool.ainvoke({"location": location}))
         return str(result)
-    except Exception as e:
-        return "未获取到天气数据";
+    except Exception as exc:
+        logger.warning(
+            "Weather tool failed location_chars=%s error=%s: %s",
+            len(location),
+            type(exc).__name__,
+            exc,
+        )
+        return "未获取到天气数据"
 
 
 # ==============================
@@ -143,15 +156,7 @@ def make_agent(system_prompt, context=""):
         max_execution_time=90,# 最大执行时间（秒）:90，超时则强制停止
     )
 
-def extract_thought(log_text: str) -> str:
-    """从 LLM 输出日志中提取 Thought 内容"""
-    match = re.search(r"Thought:\s*(.*?)(?=\nAction:|\nFinal Answer:|$)", log_text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return log_text.strip()  # 保底
-
-
-def stream_agent(executor, message, session_id="", llm_ref=None):
+def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
     """
     Synchronous agent streaming with real-time thinking log.
 
@@ -168,9 +173,11 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
         str: Event strings for SSE - either "[THINK] <msg>"
              or the final answer text.
     """
-    print(f"\n{'='*60}", flush=True)
-    print(f"[Agent] session={session_id} | Input: {message}", flush=True)
-    print(f"{'='*60}", flush=True)
+    logger.info(
+        "Agent started session=%s input_chars=%s",
+        session_id or "-",
+        len(message),
+    )
     final_answer = ""
 
     for step in executor.stream({"input": message}):
@@ -178,32 +185,36 @@ def stream_agent(executor, message, session_id="", llm_ref=None):
         steps = step.get("steps", [])
         for action in actions:
             if getattr(action, "tool", None):
-                # 提取 Thought 内容
-                thought_text = extract_thought(action.log) if hasattr(action, 'log') else ""
-                if thought_text:
-                    print(f"  |- Thought: {thought_text}")
-                    yield f"[THINK] 思考:{thought_text}"
-                print(f"  |- Tool  : {action.tool}")
-                print(f"  |- Input : {action.tool_input}")
+                # 不向浏览器暴露模型原始 Thought，只输出产品可控的阶段状态。
+                yield "[THINK] 正在分析问题并选择合适的工具。"
+                logger.info(
+                    "Agent tool started session=%s tool=%s",
+                    session_id or "-",
+                    action.tool,
+                )
         for s in steps:
             obs = s.observation.strip() if s.observation else ""
             if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
-                print(f"  |- Obs   : {obs[:200]}")
                 tool_name = getattr(s.action, 'tool', '?') if hasattr(s, 'action') and s.action else '?'
-                tool_in = getattr(s.action, 'tool_input', '') if hasattr(s, 'action') and s.action else ''
-                yield f"[STEP] 工具: {tool_name} 输入: {tool_in} 结果: {obs[:300]}"
+                # 工具输入和原始结果可能包含用户隐私或第三方响应，不直接下发。
+                yield f"[STEP] 工具 {tool_name} 执行完成。"
         if "output" in step:
             answer = step["output"]
             final_answer = answer
-            print(f"\n  -- Final Answer:\n{answer}\n", flush=True)
             yield f"[FINAL] {answer}"
+
+    logger.info(
+        "Agent completed session=%s output_chars=%s",
+        session_id or "-",
+        len(final_answer),
+    )
 
     # Save messages and trigger summary if we have a session_id
     if session_id and final_answer:
         try:
             from app.chat_history import save_message, update_summary
-            save_message(session_id, "assistant", final_answer)
+            save_message(user_id, session_id, "assistant", final_answer)
             if llm_ref:
-                update_summary(session_id)
-        except Exception as e:
-            print(f"[Agent] save error: {e}", flush=True)
+                update_summary(user_id, session_id)
+        except Exception:
+            logger.exception("Agent result persistence failed session=%s", session_id)

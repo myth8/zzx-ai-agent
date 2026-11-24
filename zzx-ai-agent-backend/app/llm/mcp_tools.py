@@ -38,7 +38,7 @@ def _load_tools_sync() -> List[Any]:
     client = MultiServerMCPClient({
         "weather_service": {
             "transport": "streamable_http",          # ← 改为 streamable_http
-            "url": "http://127.0.0.1:8000/mcp",     # ← 指向服务器 path 端点
+            "url": "http://127.0.0.1:19317/mcp",     # ← 指向服务器 path 端点
         }
     })
     async_tools = asyncio.run(client.get_tools())

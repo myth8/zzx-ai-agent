@@ -1,7 +1,21 @@
 ---
+schema_version: 1
 title: 恋爱常见问题 - 单身篇
+description: 面向单身阶段用户的择偶观念、社交拓展、情感恐惧与亲密关系准备指南。
 status: 单身
+relationship_stage: single
 category: 情感解惑
+topics:
+  - 择偶标准
+  - 社交拓展
+  - 情感安全感
+  - 亲密关系准备
+audience:
+  - 单身用户
+  - 希望建立亲密关系的人群
+language: zh-CN
+version: "1.0"
+source_type: curated
 ---
 
 # 单身篇：走出“一个人挺好”的舒适圈

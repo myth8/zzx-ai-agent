@@ -7,7 +7,15 @@ Output format:
   data: (incremental chunks)\n\n
   data: [DONE]\n\n
 """
+import json
+import logging
+
 from flask import Response, stream_with_context
+
+from app.utils.responses import get_request_id
+
+
+logger = logging.getLogger(__name__)
 
 
 def sse_response(generator_fn, *args):
@@ -26,6 +34,8 @@ def sse_response(generator_fn, *args):
         def chat():
             return sse_response(my_stream_fn, "hello")
     """
+    request_id = get_request_id()
+
     def generate():
         try:
             # Immediate heartbeat ? prevents frontend timeout
@@ -35,8 +45,18 @@ def sse_response(generator_fn, *args):
                 for line in chunk.split("\n"):
                     yield f"data: {line}\n"
                 yield "\n"
-        except Exception as e:
-            yield f"data: Error: {e}\n\n"
+        except Exception:
+            # 详细堆栈只进入服务端日志。客户端只接收稳定代码、可理解提示和
+            # request_id，方便反馈问题时关联同一次请求。
+            logger.exception("SSE stream failed")
+            payload = json.dumps({
+                "code": "CHAT_STREAM_FAILED",
+                "message": "生成过程中出现异常，请稍后重试",
+                "request_id": request_id,
+                "details": None,
+            }, ensure_ascii=False)
+            yield f"event: error\ndata: {payload}\n\n"
+            return
         yield "data: [DONE]\n\n"
 
     return Response(

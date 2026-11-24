@@ -1,166 +1,37 @@
-﻿<template>
+<template>
   <footer class="app-footer">
-    <div class="footer-content">
-      <div class="footer-section">
-        <div class="footer-logo">
-          <h3>ZZX-AI超级智能体</h3>
-        </div>
-        <div class="footer-links">
-          <a href="#">《用户协议》</a>
-          <a href="#">《隐私政策》</a>
-        </div>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="footer-mark">Z</span>
+        <span><b>ZZX AI Agent</b><small>让智能真正参与工作</small></span>
       </div>
-      
-      <div class="footer-section">
-        <h4>友情链接</h4>
-        <div class="footer-links">
-          <a href="https://juejin.cn/user/521640941459139" target="_blank">技术博客</a>
-          <a href="https://gitee.com/crzzx" target="_blank">开源仓库</a>
-          <a href="https://space.bilibili.com/1198127286?spm_id_from=333.1007.0.0" target="_blank">视频专栏</a>
-        </div>
-      </div>
-      
-      <div class="footer-section">
-        <h4>联系我们</h4>
-        <div class="footer-links">
-          <a href="#">商务合作</a>
-          <a href="#">站长：ZZX</a>
-        </div>
-      </div>
-    </div>
-    
-    <div class="footer-bottom">
-      <p>© {{ currentYear }} ZZX-AI超级智能体 - 让AI为你服务</p>
+      <nav class="footer-links" aria-label="页脚链接">
+        <a href="#">用户协议</a>
+        <a href="#">隐私政策</a>
+        <a href="https://juejin.cn/user/521640941459139" target="_blank" rel="noreferrer">技术博客</a>
+        <a href="https://gitee.com/crzzx" target="_blank" rel="noreferrer">开源仓库</a>
+      </nav>
+      <span class="copyright">© {{ currentYear }} ZZX</span>
     </div>
   </footer>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-
-// 计算当前年份
 const currentYear = computed(() => new Date().getFullYear())
 </script>
 
 <style scoped>
-.app-footer {
-  background-color: #fff;
-  padding: 40px 0 20px;
-  color: #666;
-  border-top: 1px solid #eee;
-  width: 100%;
-  margin-top: auto;
-  position: relative;
-  z-index: 2;
+.app-footer { position: relative; z-index: 2; width: 100%; border-top: 1px solid var(--line); background: rgba(7,11,22,.72); }
+.footer-inner { max-width: 1240px; min-height: 108px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 28px; margin: 0 auto; padding: 22px 28px; }
+.footer-brand { display: flex; align-items: center; gap: 11px; }
+.footer-mark { width: 32px; height: 32px; display: grid; place-items: center; color: #07101b; background: linear-gradient(135deg, var(--primary), var(--violet)); border-radius: 9px; font-weight: 800; }
+.footer-brand > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.footer-brand b { font: 700 12px 'Manrope', sans-serif; }.footer-brand small { color: #59667d; font-size: 10px; }
+.footer-links { display: flex; gap: 22px; color: #718098; font-size: 11px; }
+.footer-links a { transition: color .2s; }.footer-links a:hover { color: var(--primary); }
+.copyright { justify-self: end; color: #4e5a70; font-size: 10px; letter-spacing: .08em; }
+@media (max-width: 760px) {
+  .footer-inner { grid-template-columns: 1fr auto; }.footer-links { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; gap: 14px 20px; }.copyright { grid-column: 2; grid-row: 1; }
 }
-
-.footer-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  padding: 0 20px;
-}
-
-.footer-section {
-  flex: 1;
-  min-width: 200px;
-  margin-bottom: 30px;
-  padding: 0 15px;
-}
-
-.footer-logo h3 {
-  font-size: 1.25rem;
-  margin-bottom: 15px;
-  color: #333;
-}
-
-.footer-section h4 {
-  font-size: 1rem;
-  margin-bottom: 15px;
-  color: #333;
-}
-
-.footer-links {
-  display: flex;
-  flex-direction: column;
-}
-
-.footer-links a {
-  margin-bottom: 10px;
-  color: #666;
-  text-decoration: none;
-  transition: color 0.2s;
-}
-
-.footer-links a:hover {
-  color: #007bff;
-}
-
-.qrcode {
-  display: flex;
-  align-items: center;
-}
-
-.qrcode-container {
-  text-align: center;
-}
-
-.qrcode-placeholder {
-  width: 90px;
-  height: 90px;
-  background-color: #f5f5f5;
-  margin: 0 auto 10px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-}
-
-.qrcode-placeholder:after {
-  content: '🤖';
-}
-
-.footer-bottom {
-  text-align: center;
-  padding-top: 20px;
-  margin-top: 20px;
-  border-top: 1px solid #eee;
-  color: #999;
-  font-size: 0.9rem;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .footer-content {
-    flex-direction: column;
-  }
-  
-  .footer-section {
-    width: 100%;
-    margin-bottom: 20px;
-    padding: 0;
-  }
-}
-
-@media (max-width: 480px) {
-  .app-footer {
-    padding: 30px 0 15px;
-  }
-  
-  .footer-section h4 {
-    font-size: 0.95rem;
-  }
-  
-  .footer-links a {
-    font-size: 0.9rem;
-  }
-  
-  .qrcode-placeholder {
-    width: 80px;
-    height: 80px;
-  }
-}
-</style> 
+</style>
