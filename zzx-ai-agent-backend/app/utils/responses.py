@@ -3,8 +3,11 @@ from flask import g, jsonify
 
 
 def get_request_id():
-    """返回当前请求 ID；未经过中间件的轻量测试应用使用占位值。"""
-    return getattr(g, "request_id", "unavailable")
+    """返回当前请求 ID；无 Flask 应用上下文时返回占位值。"""
+    try:
+        return getattr(g, "request_id", "unavailable")
+    except RuntimeError:
+        return "unavailable"
 
 
 def api_error(error_code, message, status=400, details=None):
