@@ -40,6 +40,11 @@ def _env_float(name, default):
         raise RuntimeError(f"{name} must be a number") from exc
 
 
+def _env_bool(name, default):
+    value = _env(name, str(default)).lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _env_path(name, default):
     value = Path(_env(name, str(default))).expanduser()
     if not value.is_absolute():
@@ -84,6 +89,16 @@ class BaseConfig:
     MULTISTEP_CODE_TIMEOUT_SECONDS = _env_int("MULTISTEP_CODE_TIMEOUT_SECONDS", 30)
     MULTISTEP_MAX_OUTPUT_CHARS = _env_int("MULTISTEP_MAX_OUTPUT_CHARS", 20000)
     MULTISTEP_MAX_CODE_CHARS = _env_int("MULTISTEP_MAX_CODE_CHARS", 6000)
+    # Agent-internal context budget. Older ActionSteps are omitted when the
+    # rebuilt message list grows past this budget. Conversation-level history
+    # is still managed separately by chat_history.
+    MULTISTEP_CONTEXT_MAX_CHARS = _env_int("MULTISTEP_CONTEXT_MAX_CHARS", 32000)
+    MULTISTEP_CONTEXT_KEEP_STEPS = _env_int("MULTISTEP_CONTEXT_KEEP_STEPS", 8)
+    MULTISTEP_CONTEXT_MESSAGE_CHARS = _env_int("MULTISTEP_CONTEXT_MESSAGE_CHARS", 6000)
+    # Structured JSON trace lines for Agent runs. They contain lengths and
+    # metric deltas, never raw user messages or tool args.
+    AGENT_TRACE_LOG_ENABLED = _env_bool("AGENT_TRACE_LOG_ENABLED", True)
+    AGENT_TELEMETRY_ENABLED = _env_bool("AGENT_TELEMETRY_ENABLED", True)
 
     # MySQL
     MYSQL_HOST = _env("MYSQL_HOST", "127.0.0.1")
