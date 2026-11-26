@@ -10,15 +10,44 @@ Data flow:
   Prompt (system + tools + scratchpad) -> ChatOpenAI -> ReAct output parser
   -> tool_execute -> observe -> loop until Final Answer
 """
+import json
 import logging
+import time
 from datetime import datetime
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool
 from app.llm import llm
+from app.llm.agent_metrics import AgentMetricsCallback
+from app.telemetry import TelemetryRecorder
+from app.utils.responses import get_request_id
 from app.utils.safe_math import SafeMathError, evaluate_math_expression
 
 logger = logging.getLogger(__name__)
+
+
+def _format_weather_result(value):
+    """Convert the MCP weather payload into a compact human-readable result.
+
+    The MCP client may return a dict or a JSON string. ToolCalling/CodeAgent
+    otherwise tend to paste the raw payload into final answers, which makes the
+    UI noisy and wastes completion tokens. ReAct benefits from the same concise
+    observation.
+    """
+    payload = value
+    if isinstance(value, str):
+        try:
+            payload = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+    if isinstance(payload, dict) and payload.get("location"):
+        location = payload.get("location")
+        weather = payload.get("weather", "未知")
+        temperature = payload.get("temperature", "未知")
+        updated = payload.get("last_update", "未知")
+        return f"{location}：{weather}，气温 {temperature}℃，更新时间 {updated}"
+    return str(value)
+
 
 @tool
 def get_time():
@@ -63,7 +92,7 @@ def get_now_weather(location: str) -> dict:
             logger.warning("Weather tool unavailable: get_weather not exposed by MCP server")
             return "未获取到天气数据"
         result = asyncio.run(weather_tool.ainvoke({"location": location}))
-        return str(result)
+        return _format_weather_result(result)
     except Exception as exc:
         logger.warning(
             "Weather tool failed location_chars=%s error=%s: %s",
@@ -179,34 +208,98 @@ def stream_agent(executor, message, user_id=None, session_id="", llm_ref=None):
         len(message),
     )
     final_answer = ""
+    started = time.time()
+    recorder = TelemetryRecorder(
+        "react",
+        session_id=session_id,
+        request_id=get_request_id(),
+        user_id=user_id,
+        input_text=message,
+    )
+    recorder.start()
+    trace = recorder.trace()
+    trace.run_start(task_chars=len(message or ""), engine="react")
+    metrics = AgentMetricsCallback(trace=trace)
+    event_index = 0
 
-    for step in executor.stream({"input": message}):
-        actions = step.get("actions", [])
-        steps = step.get("steps", [])
-        for action in actions:
-            if getattr(action, "tool", None):
-                # 不向浏览器暴露模型原始 Thought，只输出产品可控的阶段状态。
-                yield "[THINK] 正在分析问题并选择合适的工具。"
-                logger.info(
-                    "Agent tool started session=%s tool=%s",
-                    session_id or "-",
-                    action.tool,
+    try:
+        for step in executor.stream(
+            {"input": message},
+            config={"callbacks": [metrics]},
+        ):
+            event_index += 1
+            event_started = time.time()
+            actions = step.get("actions", [])
+            steps = step.get("steps", [])
+            for action in actions:
+                if getattr(action, "tool", None):
+                    # 不向浏览器暴露模型原始 Thought，只输出产品可控的阶段状态。
+                    yield "[THINK] 正在分析问题并选择合适的工具。"
+                    logger.info(
+                        "Agent tool started session=%s tool=%s",
+                        session_id or "-",
+                        action.tool,
+                    )
+            for s in steps:
+                obs = s.observation.strip() if s.observation else ""
+                if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
+                    tool_name = getattr(s.action, 'tool', '?') if hasattr(s, 'action') and s.action else '?'
+                    # 工具输入和原始结果可能包含用户隐私或第三方响应，不直接下发。
+                    yield f"[STEP] 工具 {tool_name} 执行完成。"
+            if "output" in step:
+                answer = step["output"]
+                final_answer = answer
+                yield f"[FINAL] {answer}"
+            if trace:
+                trace.event(
+                    "stream_step",
+                    step=event_index,
+                    actions=[getattr(a, "tool", "?") for a in actions],
+                    observations=len(steps),
+                    has_output="output" in step,
+                    output_chars=len(str(step.get("output") or "")),
+                    elapsed_ms=int((time.time() - event_started) * 1000),
+                    cumulative_prompt_tokens=metrics.prompt_tokens,
+                    cumulative_completion_tokens=metrics.completion_tokens,
                 )
-        for s in steps:
-            obs = s.observation.strip() if s.observation else ""
-            if obs and "Invalid Format" not in obs and "Could not parse" not in obs:
-                tool_name = getattr(s.action, 'tool', '?') if hasattr(s, 'action') and s.action else '?'
-                # 工具输入和原始结果可能包含用户隐私或第三方响应，不直接下发。
-                yield f"[STEP] 工具 {tool_name} 执行完成。"
-        if "output" in step:
-            answer = step["output"]
-            final_answer = answer
-            yield f"[FINAL] {answer}"
+    except Exception as exc:  # noqa: BLE001
+        trace.event(
+            "run_error",
+            error_type=type(exc).__name__,
+            elapsed_ms=int((time.time() - started) * 1000),
+        )
+        raise
 
+    duration_ms = int((time.time() - started) * 1000)
+    meta = {
+        "engine": "react",
+        "engine_label": "LangChain ReAct",
+        # One model call per ReAct decision round; the callback also counts the
+        # final-answer fallback if LangChain has to generate one.
+        "steps": metrics.llm_calls,
+        "tool_calls": metrics.tool_calls,
+        "tool_errors": metrics.tool_errors,
+        "prompt_tokens": metrics.prompt_tokens,
+        "completion_tokens": metrics.completion_tokens,
+        "duration_ms": duration_ms,
+    }
+    recorder.set_output(final_answer)
+    trace.run_finish(
+        status="success",
+        steps=meta["steps"],
+        tool_calls=meta["tool_calls"],
+        tool_errors=meta["tool_errors"],
+        prompt_tokens=meta["prompt_tokens"],
+        completion_tokens=meta["completion_tokens"],
+        duration_ms=duration_ms,
+        output_chars=len(final_answer),
+    )
+    yield "[META] " + json.dumps(meta, ensure_ascii=False)
     logger.info(
-        "Agent completed session=%s output_chars=%s",
-        session_id or "-",
-        len(final_answer),
+        "Agent completed session=%s output_chars=%s steps=%s tool_calls=%s "
+        "prompt_tokens=%s completion_tokens=%s duration_ms=%s",
+        session_id or "-", len(final_answer), meta["steps"], meta["tool_calls"],
+        meta["prompt_tokens"], meta["completion_tokens"], duration_ms,
     )
 
     # Save messages and trigger summary if we have a session_id
