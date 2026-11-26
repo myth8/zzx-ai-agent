@@ -7,4 +7,7 @@ llm = ChatOpenAI(
     api_key=Config.DEEPSEEK_API_KEY,
     base_url=Config.DEEPSEEK_API_BASE,
     temperature=0.7,
+    # Streaming is what the UI uses; stream_usage asks the provider to include
+    # token counts so AgentMetricsCallback can report accurate [META] values.
+    stream_usage=True,
 )
