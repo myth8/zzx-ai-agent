@@ -87,11 +87,13 @@ def create_app(config_object=None, initialize_database=True):
     from app.auth import auth_bp
     from app.routes.session import session_bp
     from app.routes.rag_admin import rag_admin_bp
+    from app.routes.telemetry_admin import telemetry_admin_bp
     app.register_blueprint(manus_bp)
     app.register_blueprint(love_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(session_bp)
     app.register_blueprint(rag_admin_bp)
+    app.register_blueprint(telemetry_admin_bp)
 
     # Health check
     @app.route("/api/health")
