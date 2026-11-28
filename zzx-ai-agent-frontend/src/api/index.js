@@ -152,6 +152,24 @@ export const getSessionMessages = (sessionId) => {
   return request.get('/session/' + sessionId + '/messages').then(r => r.data)
 }
 
+// --- Telemetry administration API -------------------------------
+
+export const getTelemetrySummary = (hours = 24) => {
+  return request.get('/admin/telemetry/summary', { params: { hours } }).then(r => r.data)
+}
+
+export const listTelemetryRuns = (params = {}) => {
+  return request.get('/admin/telemetry/runs', { params }).then(r => r.data)
+}
+
+export const listTelemetryConversations = (params = {}) => {
+  return request.get('/admin/telemetry/conversations', { params }).then(r => r.data)
+}
+
+export const getTelemetryRun = (runId) => {
+  return request.get('/admin/telemetry/runs/' + runId).then(r => r.data)
+}
+
 // --- RAG administration API ------------------------------------
 
 export const listRagDocuments = () => {
@@ -301,9 +319,9 @@ export const chatWithLoveApp = (message, sessionId) => {
   return connectSSE('/ai/love_app/chat/sse', params)
 }
 
-// AI Super Agent chat (supports session_id for multi-turn)
-export const chatWithManus = (message, sessionId) => {
-  const params = { message }
+// AI Super Agent chat (supports session_id for multi-turn and engine routing)
+export const chatWithManus = (message, sessionId, engine = 'react') => {
+  const params = { message, engine }
   if (sessionId) params.session_id = sessionId
   return connectSSE('/ai/manus/chat', params)
 }

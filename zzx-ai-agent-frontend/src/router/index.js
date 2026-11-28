@@ -29,15 +29,30 @@ const routes = [
   },
   {
     path: '/super-agent',
+    name: 'AgentEngineSelect',
+    component: () => import('../views/EngineSelect.vue'),
+    meta: { title: '选择 Agent 引擎 - ZZX-AI超级智能体' }
+  },
+  {
+    path: '/super-agent/:engine',
     name: 'AgentSessions',
     component: () => import('../views/SessionList.vue'),
     meta: { title: 'AI超级智能体 - ZZX-AI超级智能体' }
   },
   {
-    path: '/super-agent/:sessionId',
+    path: '/super-agent/:engine/:sessionId',
     name: 'SuperAgent',
     component: () => import('../views/SuperAgent.vue'),
     meta: { title: 'AI超级智能体 - ZZX-AI超级智能体' }
+  },
+  {
+    path: '/telemetry-admin',
+    name: 'TelemetryAdmin',
+    component: () => import('../views/TelemetryAdmin.vue'),
+    meta: {
+      title: 'Agent 观测台 - ZZX-AI超级智能体',
+      requiresAdmin: true
+    }
   },
   {
     path: '/rag-admin',
