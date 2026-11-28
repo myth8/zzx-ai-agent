@@ -26,13 +26,13 @@
 
     <main>
       <section class="hero">
-        <div class="hero-kicker"><span>{{ user?.role === 'admin' ? '03' : '02' }}</span> 个专属空间已就绪</div>
+        <div class="hero-kicker"><span>{{ user?.role === 'admin' ? '04' : '02' }}</span> 个专属空间已就绪</div>
         <h1>今天，想进入哪个<br><span>智能空间</span>？</h1>
         <p>从细腻的情感建议、复杂任务规划到知识库管理，让每一种能力都有清晰入口。</p>
         <div class="hero-meta">
           <span><i class="dot green"></i>系统正常</span>
           <span><i class="dot cyan"></i>MCP 已连接</span>
-          <span><i class="dot violet"></i>长期对话</span>
+          <span><i class="dot violet"></i>3 种 Agent 引擎</span>
         </div>
       </section>
 
@@ -74,10 +74,10 @@
           </div>
           <div class="agent-tag">AUTONOMOUS REASONING</div>
           <h2>AI 超级智能体</h2>
-          <p>拆解复杂目标，调用 MCP 工具，边思考边执行，交付可用的最终结果。</p>
-          <div class="skill-row"><span>深度推理</span><span>任务规划</span><span>工具调用</span></div>
+          <p>三种引擎任选：LangChain ReAct、结构化 Tool Calling 与 Python Code Agent，拆解目标并交付结果。</p>
+          <div class="skill-row"><span>ReAct</span><span>Tool Calling</span><span>Code Agent</span></div>
           <button class="enter-button" aria-label="进入 AI 超级智能体">
-            <span>开启任务</span>
+            <span>选择引擎</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
         </article>
@@ -100,6 +100,28 @@
           <div class="skill-row"><span>文档管理</span><span>切片预览</span><span>索引刷新</span></div>
           <button class="enter-button" aria-label="进入 RAG 知识库管理">
             <span>管理知识库</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </article>
+
+        <article v-if="user?.role === 'admin'" class="agent-card telemetry-card" tabindex="0" @click="navigateTo('/telemetry-admin')" @keyup.enter="navigateTo('/telemetry-admin')">
+          <div class="card-topline">
+            <span class="agent-state"><i></i>ADMIN ONLY</span>
+            <span class="agent-index">SYSTEM / 04</span>
+          </div>
+          <div class="agent-visual telemetry-visual">
+            <svg viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <path d="M28 88V34M28 88h64" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              <path d="M38 74l16-18 13 9 19-27" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="38" cy="74" r="4" fill="currentColor"/><circle cx="54" cy="56" r="4" fill="currentColor"/><circle cx="67" cy="65" r="4" fill="currentColor"/><circle cx="86" cy="38" r="4" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="agent-tag">OBSERVABILITY & TRACES</div>
+          <h2>Agent 观测台</h2>
+          <p>查看三引擎运行的 token、steps、工具调用和结构化 trace，定位长尾与异常步骤。</p>
+          <div class="skill-row"><span>运行记录</span><span>Token 分析</span><span>Trace 时间线</span></div>
+          <button class="enter-button" aria-label="进入 Agent 观测台">
+            <span>打开观测台</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
         </article>
@@ -270,7 +292,7 @@ main { position: relative; z-index: 2; max-width: 1184px; margin: 0 auto; paddin
 .agent-card::before { content: ''; position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 47%); transition: opacity .3s; }
 .agent-card:hover, .agent-card:focus-visible { transform: translateY(-8px); border-color: color-mix(in srgb, var(--accent) 38%, transparent); box-shadow: 0 32px 90px rgba(0,0,0,.46); outline: none; }
 .agent-card:hover::before, .agent-card:focus-visible::before { opacity: 1; }
-.love-card { --accent: var(--love); }.super-card { --accent: var(--primary); }.rag-card { --accent: var(--success); }
+.love-card { --accent: var(--love); }.super-card { --accent: var(--primary); }.rag-card { --accent: var(--success); }.telemetry-card { --accent: var(--violet); }
 .card-topline { position: relative; z-index: 1; display: flex; justify-content: space-between; color: #65728a; font: 700 10px/1 'Manrope', sans-serif; letter-spacing: .13em; }
 .agent-state { display: flex; align-items: center; gap: 7px; color: color-mix(in srgb, var(--accent) 75%, white); }
 .agent-state i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 9px var(--accent); }
